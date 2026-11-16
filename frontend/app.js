@@ -2014,6 +2014,8 @@ async function stopFreeSession(showMessage) {
   if (sessionStopping) return;
   sessionStopping = true;
   sessionActive = false;
+  sessionStoppedAt = performance.now();
+  let cleanupSucceeded = true;
   try {
     const partial = interimText.textContent.trim();
     if (partial) {
@@ -2030,12 +2032,15 @@ async function stopFreeSession(showMessage) {
       const tailId = sendLocalSttTail();
       if (tailId !== null) await waitForLocalSttFlushDone(tailId, 15000);
     }
-    sessionStoppedAt = performance.now();
-    sessionActive = false;
     pendingSpeechStartMs = null;
     stopRecognition();
     stopLocalStt();
-    const cleanupSucceeded = await stopSmartSpectraTelemetry();
+    cleanupSucceeded = await stopSmartSpectraTelemetry();
+  } catch {
+    cleanupSucceeded = false;
+  } finally {
+    // Always tear down timers, camera, and UI — a failure in the async
+    // cleanup path must not leave the clock ticking or the camera running.
     stopCameraPreview();
     if (sessionClockTimer !== null) {
       window.clearInterval(sessionClockTimer);
@@ -2054,29 +2059,15 @@ async function stopFreeSession(showMessage) {
     setStreamStatus("SESSION ENDED");
     updateInterim("");
     updateUtteranceCount();
-    if (showMessage && cleanupSucceeded) {
-      showToast("Session ended. Export the transcript and any connected raw sensor samples.");
-    }
-  } catch {
-    sessionActive = false;
     sessionStopping = false;
-    pendingSpeechStartMs = null;
-    stopRecognition();
-    stopLocalStt();
-    sessionStoppedAt = performance.now();
-    sessionButton.textContent = "Start Free Session";
-    sessionButton.classList.remove("is-recording");
-    consentInput.disabled = false;
-    setSpeechStatus("IDLE");
-    setMicStatus("OFF");
-    setStreamStatus("SESSION ENDED");
-    updateInterim("");
-    updateUtteranceCount();
     if (showMessage) {
-      showToast("Session ended. Export the transcript and any connected raw sensor samples.", true);
+      showToast(
+        cleanupSucceeded
+          ? "Session ended. Export the transcript and any connected raw sensor samples."
+          : "Session ended with errors. Export the transcript and any connected raw sensor samples.",
+        !cleanupSucceeded,
+      );
     }
-  } finally {
-    sessionStopping = false;
   }
 }
 
