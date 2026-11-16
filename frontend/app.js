@@ -2011,8 +2011,9 @@ function stopCameraPreview() {
 }
 
 async function stopFreeSession(showMessage) {
-  if (!sessionActive || sessionStopping) return;
+  if (sessionStopping) return;
   sessionStopping = true;
+  sessionActive = false;
   try {
     const partial = interimText.textContent.trim();
     if (partial) {
