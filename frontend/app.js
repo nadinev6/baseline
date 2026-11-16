@@ -20,7 +20,7 @@ const {
   extractBiometricReadings,
   hasPositiveMeasurement,
 } = require("./telemetry-analysis");
-const { headDirectionFromLandmarks } = require("./gaze-estimation");
+const { headDirectionFromLandmarks, HEAD_DIRECTION_SOURCE } = require("./gaze-estimation");
 
 const $ = (selector) => document.querySelector(selector);
 const SENSOR_FEATURE_PREFERENCE_KEY = "baseline.sensorFeatures";
