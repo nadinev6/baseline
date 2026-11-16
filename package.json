@@ -1,0 +1,23 @@
+{
+  "name": "baseline-practice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local free-flow practice app with SmartSpectra telemetry",
+  "main": "main.cjs",
+  "scripts": {
+    "build": "esbuild frontend\\app.js --bundle --outfile=frontend\\dist\\app.bundle.js --platform=browser --format=iife",
+    "start": "npm run build && node launch-electron.cjs",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check launch-electron.cjs && node --check frontend\\app.js",
+    "test:telemetry": "node --test frontend\\app.test.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "1.2.3",
+    "@smartspectra/node-sdk": "3.4.0",
+    "@xenova/transformers": "^2.17.2",
+    "onnxruntime-node": "^1.22.0"
+  },
+  "devDependencies": {
+    "electron": "43.8.7",
+    "esbuild": "0.25.0"
+  }
+}
