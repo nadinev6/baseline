@@ -106,12 +106,11 @@ transcript text and a coarse word-per-minute pacing label based on approximate
 utterance timing. It does not currently calculate semantic text scores or
 acoustic prosody.
 
-The optional experimental gaze tracker uses the local WebGazer.js wrapper around
-MediaPipe FaceMesh (WebGazer ships the MediaPipe FaceMesh model and runtime).
-It self-calibrates passively from user cursor clicks/movement and emits
-preview-relative screen-direction vectors once calibrated (about two seconds
-settled plus a small sample count). Enabling gaze in Features starts the
-tracker; it remains experimental and unvalidated. Direction vectors
+The optional experimental head-direction estimate is derived from SmartSpectra
+face landmarks (478-point FaceMesh landmarks returned by the SDK). It emits
+preview-relative screen-direction vectors once landmark packets are received;
+NLP/cognitive classification remains disabled. Enabling gaze in Features starts
+the estimate; it remains experimental and unvalidated. Direction vectors
 (`UP_LEFT`, `UP_RIGHT`, `DOWN_LEFT`, `DOWN_RIGHT`, `LATERAL_LEFT`, `LATERAL_RIGHT`)
 are mapped to NLP cue codes (`nlp_code`) and cognitive state types
 (`cognitive_type`) per the NLP reference guide using the subject handedness

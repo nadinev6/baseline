@@ -2,7 +2,6 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const path = require("path");
 
 const {
   buildHeadDirectionAnalysis,
@@ -16,52 +15,46 @@ const {
   hasPositiveMeasurement,
 } = require("./telemetry-analysis");
 const {
-  CALIBRATION_TARGETS,
   classifyPreviewDirection,
-  estimateGaze,
-  extractEyeFeatures,
-  fitGazeCalibration,
+  HEAD_DIRECTION_SOURCE,
+  headDirectionFromLandmarks,
   mapDirection,
 } = require("./gaze-estimation");
-const {
-  HeadDirectionTracker,
-  HEAD_DIRECTION_SOURCE,
-} = require("./eye-gaze-tracker");
 
 const utterance = { timestamp_start_ms: 1000, timestamp_end_ms: 3000 };
 
 test("reports head-direction as unavailable when no estimator is configured", () => {
   const result = buildHeadDirectionAnalysis(utterance, []);
-  assert.equal(result.analysis_status, "head_direction_estimator_not_configured");
-  assert.equal(result.head_direction_estimation_method, "not_configured");
+  assert.equal(result.gaze_estimation_method, "not_configured");
+  assert.equal(result.analysis_status, "gaze_estimator_not_configured");
   assert.equal(result.cognitive_type, null);
 });
 
 test("does not classify unvalidated adapter coordinates as head direction or cognition", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
-    { sample_id: "h-00001", timestamp_ms: 500, x: 0.8, y: 0.7, source: "adapter_unvalidated" },
+    { sample_id: "g-00001", timestamp_ms: 1500, x: 0.8, y: 0.7, source: "adapter_unvalidated" },
   ]);
-  assert.equal(result.analysis_status, "unvalidated_head_direction_samples_not_classified");
+  assert.equal(result.analysis_status, "unvalidated_gaze_samples_not_classified");
   assert.equal(result.pre_speech_vector, null);
   assert.equal(result.nlp_code, null);
   assert.equal(result.cognitive_type, null);
-  assert.deepEqual(result.associated_sample_ids, ["h-00001"]);
+  assert.deepEqual(result.associated_sample_ids, ["g-00001"]);
 });
 
 test("reports calibrated head-direction sample with NLP mapping applied", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
     {
-      sample_id: "h-00002",
+      sample_id: "g-00002",
       timestamp_ms: 900,
       x: -0.5,
       y: -0.4,
-      source: "head_direction",
+      source: HEAD_DIRECTION_SOURCE,
       calibrated: true,
     },
   ]);
   assert.equal(result.pre_speech_direction, "UP_LEFT");
-  assert.equal(result.head_direction_estimation_method, "experimental_preview_relative_head_direction");
-  assert.equal(result.analysis_status, "experimental_preview_head_direction_available_nlp_mapping_disabled");
+  assert.equal(result.gaze_estimation_method, "experimental_head_pose_landmarks");
+  assert.equal(result.analysis_status, "experimental_preview_gaze_available_nlp_mapping_disabled");
   assert.equal(result.pre_speech_vector, null);
   assert.equal(result.nlp_code, "Vc");
   assert.equal(result.nlp_classification, "Visual Constructed");
@@ -70,23 +63,23 @@ test("reports calibrated head-direction sample with NLP mapping applied", () => 
 
 test("reports calibrated head-direction sample in utterance window when not in pre-speech window", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
-    { sample_id: "h-00004", timestamp_ms: 1500, x: 0.3, y: -0.3, source: "head_direction", calibrated: true },
+    { sample_id: "g-00004", timestamp_ms: 1500, x: 0.3, y: -0.3, source: HEAD_DIRECTION_SOURCE, calibrated: true },
   ]);
   assert.equal(result.pre_speech_direction, "UP_RIGHT");
   assert.equal(result.nlp_code, "Vr");
   assert.equal(result.cognitive_type, "REMEMBERED");
-  assert.equal(result.head_direction_sample_count, 1);
+  assert.equal(result.gaze_sample_count, 1);
   assert.equal(result.associated_sample_ids.length, 1);
 });
 
 test("does not classify pre-speech uncalibrated samples but counts them", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
-    { sample_id: "h-00005", timestamp_ms: 900, x: -0.5, y: -0.4, source: "head_direction", calibrated: false },
+    { sample_id: "g-00005", timestamp_ms: 900, x: -0.5, y: -0.4, source: HEAD_DIRECTION_SOURCE, calibrated: false },
   ]);
   assert.equal(result.pre_speech_direction, null);
   assert.equal(result.nlp_code, null);
   assert.equal(result.cognitive_type, null);
-  assert.equal(result.head_direction_sample_count, 1);
+  assert.equal(result.gaze_sample_count, 1);
   assert.equal(result.associated_sample_ids.length, 1);
 });
 
@@ -98,9 +91,9 @@ test("uses right-handedness direction mapping by default", () => {
 
 test("handedness inversion flips horizontal direction", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
-    { sample_id: "h-00006", timestamp_ms: 1000, x: -0.3, y: 0.2, source: "head_direction", calibrated: true },
+    { sample_id: "g-00006", timestamp_ms: 1000, x: -0.3, y: 0.2, source: HEAD_DIRECTION_SOURCE, calibrated: true },
   ], "left");
-  assert.equal(result.pre_speech_direction, "LATERAL_RIGHT"); // inverted
+  assert.equal(result.pre_speech_direction, "LATERAL_RIGHT");
   assert.equal(result.nlp_code, "Ar");
   assert.equal(result.cognitive_type, "REMEMBERED");
 });
@@ -116,118 +109,37 @@ test("mapDirection handles all observer-view vectors and lateral states", () => 
   assert.equal(mapDirection(0.0, 0.1).direction, "CENTER");
 });
 
-test("extracts normalized eye and head-pose features from iris landmarks", () => {
-  const features = extractEyeFeatures(makeLandmarks());
-  assert.equal(features.length, 4);
-  assert.ok(features.every(Number.isFinite));
-  assert.ok(Math.abs(features[0]) < 0.001);
-  assert.ok(Math.abs(features[1]) < 0.001);
-  assert.equal(extractEyeFeatures(makeLandmarks(0.5, 0.5))[0] > features[0], true);
-  assert.equal(extractEyeFeatures(makeLandmarks(0.5, 0.5))[1] > features[1], true);
+test("headDirectionFromLandmarks returns null for missing or invalid landmarks", () => {
+  assert.equal(headDirectionFromLandmarks(null), null);
+  assert.equal(headDirectionFromLandmarks([]), null);
+  assert.equal(headDirectionFromLandmarks([{ x: 0.5, y: 0.5 }]), null);
+  const landmarks = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5 }));
+  assert.equal(headDirectionFromLandmarks(landmarks), null);
 });
 
-function makeLandmarks(horizontal = 0, vertical = 0) {
+test("headDirectionFromLandmarks derives direction from nose relative to face center", () => {
   const landmarks = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5 }));
-  const irisX = 0.43 + horizontal * 0.015;
-  const irisY = 0.5 + vertical * 0.01;
-  landmarks[33] = { x: 0.4, y: 0.5 };
-  landmarks[133] = { x: 0.46, y: 0.5 };
-  landmarks[159] = { x: 0.43, y: 0.48 };
-  landmarks[145] = { x: 0.43, y: 0.52 };
-  landmarks[468] = { x: irisX, y: irisY };
-  landmarks[362] = { x: 0.54, y: 0.5 };
-  landmarks[263] = { x: 0.6, y: 0.5 };
-  landmarks[386] = { x: 0.57, y: 0.48 };
-  landmarks[374] = { x: 0.57, y: 0.52 };
-  landmarks[473] = { x: 0.57 + horizontal * 0.015, y: irisY };
+  landmarks[1] = { x: 0.6, y: 0.5 };
   landmarks[234] = { x: 0.2, y: 0.5 };
   landmarks[454] = { x: 0.8, y: 0.5 };
-  landmarks[1] = { x: 0.5, y: 0.52 };
   landmarks[10] = { x: 0.5, y: 0.1 };
   landmarks[152] = { x: 0.5, y: 0.9 };
-  return landmarks;
-}
-
-test("rejects incomplete or blink-occluded eye landmarks", () => {
-  assert.equal(extractEyeFeatures([]), null);
-  const blink = makeLandmarks();
-  blink[145] = { x: 0.43, y: 0.481 };
-  assert.equal(extractEyeFeatures(blink), null);
+  const dir = headDirectionFromLandmarks(landmarks);
+  assert.ok(dir !== null);
+  assert.ok(Number.isFinite(dir.x));
+  assert.ok(Number.isFinite(dir.y));
+  assert.ok(Math.abs(dir.x - 0.166) < 0.02);
+  assert.equal(dir.y, 0);
 });
 
-test("fits calibration and returns bounded preview-relative estimates", () => {
-  const samples = CALIBRATION_TARGETS.map((target) => ({
-    features: [target.x / 0.7, target.y / 0.7, 0, 0],
-    x: target.x,
-    y: target.y,
-  }));
-  const fitted = fitGazeCalibration(samples);
-  assert.equal(fitted.ok, true);
-  const estimate = estimateGaze([0.5, -0.5, 0, 0], fitted.calibration);
-  assert.ok(Math.abs(estimate.x - 0.35) < 0.01);
-  assert.ok(Math.abs(estimate.y + 0.35) < 0.01);
-  assert.equal(estimate.direction.direction, "UP_RIGHT");
-  assert.equal(estimate.clipped, false);
-  const clipped = estimateGaze([3, 0, 0, 0], fitted.calibration);
-  assert.equal(clipped.x, 1);
-  assert.equal(clipped.clipped, true);
-  assert.equal(classifyPreviewDirection(-0.9, 0.1).direction, "LATERAL_LEFT");
-});
-
-test("rejects calibration without enough eye movement variation", () => {
-  const samples = CALIBRATION_TARGETS.map((target) => ({
-    features: [0, 0, 0, 0],
-    x: target.x,
-    y: target.y,
-  }));
-  const fitted = fitGazeCalibration(samples);
-  assert.equal(fitted.ok, false);
-  assert.match(fitted.error, /varied too little/);
-});
-
-test("keeps failed calibration captures until the user explicitly retries", () => {
-  const pendingCalibration = CALIBRATION_TARGETS.map((target) => ({
-    features: [target.x / 0.7, target.y / 0.7, 0, 0],
-    x: target.x,
-    y: target.y,
-  }));
-  pendingCalibration[0].x = 0.7;
-  const tracker = Object.create(HeadDirectionTracker.prototype);
-  Object.assign(tracker, {
-    landmarker: {},
-    stopped: false,
-    calibration: null,
-    calibrationState: "collecting",
-    pendingCalibration,
-    lastStatus: "calibrating",
-    diagnostics: { calibration_targets_captured: CALIBRATION_TARGETS.length, calibration_failure: null },
-    onStatus(status) {
-      this.reportedStatus = status;
-    },
-  });
-
-  const result = tracker.completeCalibration();
-  assert.equal(result.ok, false);
-  assert.equal(tracker.pendingCalibration.length, CALIBRATION_TARGETS.length);
-  assert.equal(tracker.calibrationState, "failed");
-  assert.equal(tracker.diagnostics.calibration_targets_captured, CALIBRATION_TARGETS.length);
-  assert.equal(tracker.diagnostics.calibration_failure, "Capture all nine calibration targets before finishing.");
-  assert.equal(tracker.reportedStatus, "calibration_failed");
-
-  tracker.beginCalibration();
-  assert.equal(tracker.pendingCalibration.length, 0);
-  assert.equal(tracker.calibrationState, "collecting");
-  assert.equal(tracker.diagnostics.calibration_failure, null);
-});
-
-test("WebGazer tracker loads without a real webcam and exposes diagnostics", () => {
-  const tracker = new HeadDirectionTracker({
-    onStatus: () => {},
-    onEstimate: () => {},
-  });
-  assert.equal(tracker.diagnostics.status, "not_started");
-  tracker.stop();
-  assert.equal(tracker.diagnostics.status, "stopped");
+test("headDirectionFromLandmarks rejects too-small face boxes", () => {
+  const landmarks = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5 }));
+  landmarks[1] = { x: 0.51, y: 0.5 };
+  landmarks[234] = { x: 0.49, y: 0.5 };
+  landmarks[454] = { x: 0.51, y: 0.5 };
+  landmarks[10] = { x: 0.5, y: 0.49 };
+  landmarks[152] = { x: 0.5, y: 0.51 };
+  assert.equal(headDirectionFromLandmarks(landmarks), null);
 });
 
 test("returns null averages when pulse or HRV readings are absent", () => {
@@ -264,6 +176,8 @@ test("cardio baselines remain unavailable when readings do not span enough time"
   ]);
   assert.equal(baseline.pulse_bpm.status, "insufficient_baseline_samples");
   assert.equal(baseline.pulse_bpm.value, null);
+  assert.equal(baseline.hrv_ms.status, "insufficient_baseline_samples");
+  assert.equal(baseline.hrv_ms.value, null);
 });
 
 test("cardio baselines ignore unstable readings", () => {
@@ -291,6 +205,12 @@ test("requests blink by default and includes only selected cardio metrics", () =
   assert.deepEqual(buildRequestedMetrics({ pulse: true, hrv: false }, metricType), [12, 15]);
   assert.deepEqual(buildRequestedMetrics({ pulse: false, hrv: true }, metricType), [12, 17]);
   assert.deepEqual(buildRequestedMetrics({ pulse: true, hrv: true }, metricType), [12, 15, 17]);
+});
+
+test("requests FACE_LANDMARKS when headDirection feature is enabled", () => {
+  const metricType = { BLINKING: 12, FACE_LANDMARKS: 11, PULSE_RATE: 15, HRV: 17 };
+  assert.deepEqual(buildRequestedMetrics({ pulse: false, hrv: false, headDirection: true }, metricType), [12, 11]);
+  assert.deepEqual(buildRequestedMetrics({ pulse: true, hrv: true, headDirection: true }, metricType), [12, 11, 15, 17]);
 });
 
 test("counts stable blink-on transitions without treating initial state or blink-off as events", () => {
@@ -373,15 +293,4 @@ test("stores blinking observations when cardio metrics are absent", () => {
   assert.equal(result.availability.blinking, true);
   assert.equal(result.availability.pulse_rate, false);
   assert.equal(result.availability.hrv, false);
-});
-
-test("reports head-direction tracker status on initialize", () => {
-  const tracker = new HeadDirectionTracker({
-    video: null,
-    getElapsedMs: () => 0,
-    onStatus: () => {},
-    onEstimate: () => {},
-  });
-  tracker.start();
-  assert.equal(tracker.diagnostics.status, "not_configured");
 });

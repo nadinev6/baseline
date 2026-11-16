@@ -204,7 +204,7 @@ function createWindow() {
   ipcMain.on("practice:sensor-feature-state", (event, features) => {
     if (!isAppWindowSender(event) || !features || typeof features !== "object") return;
     for (const [feature, item] of sensorFeatureMenuItems) {
-      if (typeof features[feature] === "boolean") item.checked = features[feature];
+      if (item && typeof features[feature] === "boolean") item.checked = features[feature];
     }
   });
 

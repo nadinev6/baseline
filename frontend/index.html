@@ -84,10 +84,6 @@
                             <div class="camera-placeholder-icon" aria-hidden="true">◎</div>
                             <p>Camera preview is off</p>
                         </div>
-                        <div class="camera-overlay" aria-hidden="true">
-                            <div class="framing-guide"></div>
-                            <span class="framing-guide-label">POSITIONING GUIDE</span>
-                        </div>
                         <div class="camera-corner camera-corner-tl"></div>
                         <div class="camera-corner camera-corner-tr"></div>
                         <div class="camera-corner camera-corner-bl"></div>
@@ -151,13 +147,12 @@
         <form method="dialog" id="microphone-form" class="consent-dialog-card">
             <span class="section-kicker">AUDIO INPUT</span>
             <h2 id="microphone-title">Microphone</h2>
-            <p>Pick which input the app listens to for transcription. Speak while this dialog is open to compare devices on the level meter.</p>
             <div id="microphone-options" class="mic-options" role="radiogroup" aria-label="Microphone device"></div>
             <div class="mic-meter-row" aria-hidden="true">
                 <span class="mic-meter-label">LEVEL</span>
                 <div class="mic-meter"><div id="mic-meter-fill" class="mic-meter-fill"></div></div>
             </div>
-            <p id="microphone-note" class="speech-support-note">Transcription follows the system default until you save a device.</p>
+            <p id="microphone-note" class="speech-support-note"></p>
             <div class="consent-dialog-actions">
                 <button id="microphone-close-button" class="small-action" type="submit" value="close">Close</button>
                 <button id="microphone-save-button" class="action-btn" type="submit" value="save">Save</button>
@@ -169,10 +164,8 @@
         <form method="dialog" id="camera-form" class="consent-dialog-card">
             <span class="section-kicker">VIDEO INPUT</span>
             <h2 id="camera-title">Camera</h2>
-            <p>Pick which camera feeds the preview and the SmartSpectra measurement. The choice applies to the next session; the preview shows the selected camera now.</p>
             <div id="camera-options" class="mic-options" role="radiogroup" aria-label="Camera device"></div>
-            <video id="camera-preview-video" class="camera-preview-video" autoplay playsinline muted></video>
-            <p id="camera-note" class="speech-support-note">Measurement follows the system default until you save a device.</p>
+            <p id="camera-note" class="speech-support-note"></p>
             <div class="consent-dialog-actions">
                 <button id="camera-close-button" class="small-action" type="submit" value="close">Close</button>
                 <button id="camera-save-button" class="action-btn" type="submit" value="save">Save</button>
@@ -213,7 +206,6 @@
                 <button type="button" class="info-tab" role="tab" id="info-tab-json" aria-selected="false" aria-controls="info-panel-json" tabindex="-1">JSON example</button>
             </div>
             <section role="tabpanel" id="info-panel-overview" class="info-tabpanel" aria-labelledby="info-tab-overview" tabindex="0">
-                <p id="information-description">Baseline captures a local transcript and timestamped blink observations by default. Pulse, HRV, and experimental head direction tracking are optional in Features. It does not infer a person's intent, truthfulness, or cognitive state.</p>
                 <dl class="info-grid">
                     <div class="info-row">
                         <dt>Camera</dt>
@@ -225,7 +217,7 @@
                     </div>
                     <div class="info-row">
                         <dt>SmartSpectra</dt>
-                        <dd>Blink detection is requested by default. Optional pulse rate and HRV RMSSD can be enabled in Features; only selected SDK metrics are requested. Feature changes apply to a new app session, so restart Baseline after ending the current session. The local experimental head-direction tracker uses WebGazer.js with MediaPipe FaceMesh and self-calibrates passively from cursor clicks/movement; it emits preview-relative direction vectors and NLP/cognitive labels once calibrated. The app computes only coarse word-per-minute pacing from approximate transcript timing; semantic text scores and acoustic prosody are not yet calculated. SDK errors and validation statuses are exported, retryable engine failures restart the pipeline automatically (at most twice per session), and a 10 s packet gap turns the sensor chip to STALLED. Cognitive-state labels are not calculated.</dd>
+                        <dd>Blink detection is requested by default. Optional pulse rate and HRV RMSSD can be enabled in Features; only selected SDK metrics are requested. Feature changes apply to a new app session, so restart Baseline after ending the current session. The experimental head-direction estimate is derived from SmartSpectra face landmarks and emits preview-relative direction vectors with NLP/cognitive labels once available; NLP/cognitive classification remains disabled. The app computes only coarse word-per-minute pacing from approximate transcript timing; semantic text scores and acoustic prosody are not yet calculated. SDK errors and validation statuses are exported, retryable engine failures restart the pipeline automatically (at most twice per session), and a 10 s packet gap turns the sensor chip to STALLED. Cognitive-state labels are not calculated.</dd>
                     </div>
                     <div class="info-row">
                         <dt>API key</dt>
@@ -236,7 +228,6 @@
                         <dd>The session JSON contains session metadata, transcript windows, blink events, enabled-feature and requested-metric details, optional head-direction/cardio samples, SmartSpectra diagnostics, SDK errors, and source status. Missing values stay null rather than appearing as zero. Only one app instance can own a session; a second launch focuses the existing window.</dd>
                     </div>
                 </dl>
-                <p class="info-disclaimer">The SmartSpectra SDK is for general wellness use; its metrics are not a diagnostic or a validated measure of cognitive state.</p>
             </section>
             <!-- Keep in sync with nlp_reference_guide.md -->
             <section role="tabpanel" id="info-panel-gaze" class="info-tabpanel" aria-labelledby="info-tab-gaze" tabindex="0" hidden>
@@ -341,7 +332,7 @@
                 <div class="info-section">
                     <h3>Mapping rules</h3>
                     <ul class="info-rules">
-                        <li><strong>Head direction:</strong> optional local head-direction tracker can be enabled in Features. It self-calibrates passively from cursor clicks/movement and emits preview-relative direction vectors with NLP/cognitive labels once calibrated. It remains experimental and unvalidated.</li>
+                        <li><strong>Head direction:</strong> optional SmartSpectra face-landmark head-direction estimation can be enabled in Features. It emits preview-relative direction vectors with NLP/cognitive labels once landmark packets are received; NLP/cognitive classification remains disabled and the estimate is experimental and unvalidated.</li>
                         <li><strong>Blinks:</strong> blink detection is requested by default. Stable blink-on transitions are exported as events and linked to approximate transcript windows; event rates are descriptive only, not a cognitive-state measure.</li>
                         <li><strong>Cardio baseline:</strong> pulse and HRV each use the median of their first 30 seconds of stable readings; each baseline requires at least 3 samples spanning at least 15 seconds. Changes are computed only from later stable readings.</li>
                         <li><strong>Cardio response candidate:</strong> set only when both post-baseline changes exist and pulse is at least 4 BPM above baseline while HRV is at least 15 ms below baseline. This provisional heuristic is not a validated stress measure or diagnosis.</li>

@@ -20,7 +20,7 @@ const {
   extractBiometricReadings,
   hasPositiveMeasurement,
 } = require("./telemetry-analysis");
-const { HeadDirectionTracker } = require("./eye-gaze-tracker");
+const { headDirectionFromLandmarks } = require("./gaze-estimation");
 
 const $ = (selector) => document.querySelector(selector);
 const SENSOR_FEATURE_PREFERENCE_KEY = "baseline.sensorFeatures";
@@ -38,6 +38,9 @@ function readSensorFeaturePreferences() {
     return { ...DEFAULT_SENSOR_FEATURES };
   }
 }
+
+let sensorFeaturePreferences = readSensorFeaturePreferences();
+let activeSessionFeatures = { ...sensorFeaturePreferences };
 
 function getRequestedMetricInfo(features) {
   const codes = buildRequestedMetrics(features, MetricType);
@@ -73,7 +76,7 @@ const consentSupportNote = $("#speech-support-note");
 const confirmSessionButton = $("#confirm-session-button");
 const exportButton = $("#export-button");
 const measurementReadiness = $("#measurement-readiness") ?? null;
-const headDirectionValue = $("#head-direction-value");
+const headDirectionValue = $("#headDirection-value");
 const headDirectionCanvas = $("#head-direction-canvas");
 const headDirectionDot = $("#head-direction-dot");
 const microphoneDialog = $("#microphone-dialog");
@@ -85,7 +88,6 @@ const cameraDialogElement = $("#camera-dialog");
 const cameraForm = $("#camera-form");
 const cameraOptions = $("#camera-options");
 const cameraNote = $("#camera-note");
-const cameraPreviewVideo = $("#camera-preview-video");
 const informationDialog = $("#information-dialog");
 const infoTabButtons = [...document.querySelectorAll("#information-dialog .info-tab")];
 const infoPanels = new Map(
@@ -173,9 +175,6 @@ let cameraPreviewWasConnected = false;
 let smartSpectraClient = null;
 let smartSpectraStartPromise = null;
 let smartSpectraState = "not_connected";
-let sensorFeaturePreferences = readSensorFeaturePreferences();
-let activeSessionFeatures = { ...sensorFeaturePreferences };
-let headDirectionTracker = null;
 let recognition = null;
 let recognitionRestartTimer = null;
 let recognitionStartupTimer = null;
@@ -382,56 +381,21 @@ function updateSensorFeaturePreference(feature, enabled) {
   }
 }
 
-async function startHeadDirectionTracking() {
-  if (!activeSessionFeatures.headDirection || !sessionActive || !cameraStream) return;
-  if (headDirectionTracker) return;
-
-  const tracker = new HeadDirectionTracker({
-    video: cameraVideo,
-    getElapsedMs: elapsedMs,
-    onStatus: (status, detail) => {
-      headDirectionTrackerDiagnostics = { ...tracker.diagnostics };
-      headDirectionValue.textContent = status === "ready" || status === "calibrated"
-        ? "CALIBRATION REQUIRED"
-        : status.toUpperCase();
-      if (detail) logTelemetry(`head-direction tracker status: ${status} — ${detail}`);
-      else logTelemetry(`head-direction tracker status: ${status}`);
-    },
-    onEstimate: (sample) => {
-      recordHeadDirectionSample(sample, {
-        source: "head_direction",
-        calibrated: Boolean(sample.calibrated),
-      });
-      renderHeadDirectionOverlay(sample);
-    },
-  });
-  headDirectionTracker = tracker;
-  headDirectionTrackerDiagnostics = { ...tracker.diagnostics };
-  try {
-    await tracker.start();
-    headDirectionTrackerDiagnostics = { ...tracker.diagnostics };
-    if (sessionActive && headDirectionTracker === tracker &&
-        (tracker.diagnostics.status === "ready" || tracker.diagnostics.status === "calibrated")) {
-      headDirectionValue.textContent = "CALIBRATION REQUIRED";
-      logTelemetry("head-direction tracker initialized; WebGazer self-calibrates from cursor and click activity");
-    }
-  } catch (error) {
-    tracker.stop();
-    headDirectionTrackerDiagnostics = { ...tracker.diagnostics };
-    headDirectionTracker = null;
-    headDirectionValue.textContent = "ERROR";
-    const message = error instanceof Error ? error.message : String(error);
-    logTelemetry(`head-direction tracker failed to start: ${message}`);
-    showToast(`Experimental head-direction tracking could not start: ${message}`, true);
+function setHeadDirectionPreviewStatus() {
+  if (activeSessionFeatures.headDirection) {
+    headDirectionTrackerDiagnostics = {
+      status: "awaiting_smart_spectra",
+      frames_processed: 0,
+      faces_detected: 0,
+      usable_eye_frames: 0,
+      rejected_eye_frames: 0,
+      estimates_emitted: 0,
+      error: null,
+    };
+    headDirectionValue.textContent = "AWAITING SMARTSPECTRA";
+  } else {
+    setHeadDirectionTrackingDisabled();
   }
-}
-
-function stopHeadDirectionTracking() {
-  if (!headDirectionTracker) return;
-  const tracker = headDirectionTracker;
-  tracker.stop();
-  headDirectionTrackerDiagnostics = { ...tracker.diagnostics };
-  headDirectionTracker = null;
 }
 
 // Telemetry milestones print to the `npm start` terminal via the main
@@ -683,7 +647,7 @@ function startRecognition() {
     updateInterim(interim);
   };
 
-  instance.onerror = (event) => {
+instance.onerror = (event) => {
     const error = event.error;
     const isPermissionError = error === "not-allowed";
     if (!speechEverStarted &&
@@ -706,12 +670,10 @@ function startRecognition() {
         ? "Speech recognition could not access the microphone. Check the microphone permission before starting another session."
         : error === "audio-capture"
           ? "The speech service could not capture microphone audio. Check that the microphone is connected and not in use by another app."
-          : `Speech recognition reported “${error}”.`,
+          : `Speech recognition reported "${error}".`,
       isFatal || isPermissionError,
     );
-    if (isPermissionError) {
-      void stopFreeSession(false);
-    } else if (isFatal) {
+    if (isPermissionError || isFatal) {
       recognition = null;
       clearRecognitionRestart();
       setStreamStatus("UNAVAILABLE");
@@ -832,6 +794,16 @@ function addSmartSpectraMetrics(buffer, timestampUs) {
   }
   trackLandmarkDiagnostics(landmarks, sample.timestamp_ms);
 
+  if (hasLandmarks && activeSessionFeatures.headDirection && sessionActive) {
+    const headDirection = headDirectionFromLandmarks(landmarks.value);
+    if (headDirection) {
+      recordHeadDirectionSample(
+        { ...headDirection, timestamp_ms: sample.timestamp_ms, calibrated: true },
+        { source: "smartspectra_landmarks", calibrated: true },
+      );
+      if (headDirectionValue.textContent !== "LANDMARKS") headDirectionValue.textContent = "LANDMARKS";
+    }
+  }
 }
 
 // Records the SDK's per-packet talking state and logs only state transitions
@@ -893,7 +865,7 @@ function trackLandmarkDiagnostics(landmarks, timestampMs) {
   faceMetricDiagnostics.first_landmark_reset = Boolean(landmarks.reset);
   logTelemetry(
     `face landmarks available: ${landmarks.value.length} points, ` +
-    `stable=${Boolean(landmarks.stable)}, reset=${Boolean(landmarks.reset)} — SDK landmarks are not used for gaze; local MediaPipe eye tracking is separate`,
+    `stable=${Boolean(landmarks.stable)}, reset=${Boolean(landmarks.reset)} — SDK landmarks are used for head-direction estimation; raw facial coordinates are not exported`,
   );
 }
 
@@ -1127,6 +1099,7 @@ async function startSmartSpectraTelemetry(stream) {
   const attemptRecovery = async (originalMessage) => {
     if (smartSpectraRecoveryInFlight || !sessionActive || sessionStopping) return;
     if (smartSpectraClient !== client) return;
+    if (smartSpectraState === "auth_rejected") return;
     if (recoveryAttempts >= SMARTSPECTRA_MAX_RECOVERY_ATTEMPTS) {
       if (!recoveryBudgetExhaustedLogged) {
         recoveryBudgetExhaustedLogged = true;
@@ -1325,12 +1298,11 @@ async function stopSmartSpectraTelemetry() {
       await smartSpectraStartPromise;
     } catch (error) {
       stopError = error;
-      // A startup failure surfacing during shutdown still belongs to the
-      // start stage of the session; record it so the export keeps the cause.
       const parts = extractErrorParts(error);
       recordSmartSpectraError(parts.code, parts.message, parts.retryable, "start");
+    } finally {
+      smartSpectraStartPromise = null;
     }
-    smartSpectraStartPromise = null;
   }
   try {
     await client.stop();
@@ -1355,7 +1327,6 @@ async function stopSmartSpectraTelemetry() {
     );
   }
   if (smartSpectraState === "auth_rejected") {
-    // Keep the auth diagnosis visible in exports taken after the session ends.
     setSmartSpectraStatus("auth rejected");
   } else if (stopError) {
     setSmartSpectraStatus("shutdown error");
@@ -1531,21 +1502,13 @@ async function startCameraPreview(deviceId) {
   let stream = null;
   try {
     stream = await navigator.mediaDevices.getUserMedia(constraints);
-    if (!sessionActive) {
-      stream.getTracks().forEach((track) => track.stop());
-      return false;
-    }
     cameraStream = stream;
     cameraVideo.srcObject = cameraStream;
-    if (activeSessionFeatures.headDirection) {
-      void startHeadDirectionTracking();
-    } else {
-      setHeadDirectionTrackingDisabled();
-    }
     cameraPreviewWasConnected = true;
     cameraStage.classList.add("is-live");
     cameraPlaceholder.hidden = true;
     setCameraStatus("PREVIEW ON");
+    setHeadDirectionPreviewStatus();
     return true;
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop());
@@ -1595,17 +1558,13 @@ async function startVideoFilePreview(file) {
     cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
   }
-  cameraStream = cameraVideo.captureStream(30);
-  if (activeSessionFeatures.headDirection) {
-    void startHeadDirectionTracking();
-  } else {
-    setHeadDirectionTrackingDisabled();
-  }
+cameraStream = cameraVideo.captureStream(30);
   cameraPreviewWasConnected = true;
   cameraStage.classList.add("is-live");
-  cameraPlaceholder.hidden = true;
-  setCameraStatus("VIDEO FILE");
-  return true;
+    cameraPlaceholder.hidden = true;
+    setCameraStatus("VIDEO FILE");
+    setHeadDirectionPreviewStatus();
+    return true;
 }
 
 async function populateCameraOptions(savedId) {
@@ -1656,8 +1615,7 @@ async function populateCameraOptions(savedId) {
 }
 
 async function openCameraSettings() {
-  cameraNote.textContent =
-    "Measurement follows the selected camera for the next session; the preview shows the selected camera now.";
+  cameraNote.textContent = "";
   const savedId = getPreferredCameraDeviceId();
   let populated = false;
   try {
@@ -1788,8 +1746,7 @@ async function populateMicrophoneOptions(savedId) {
 }
 
 async function openMicrophoneSettings() {
-  microphoneNote.textContent =
-    "Transcription uses this input for the next session; the level meter shows the selected device now.";
+  microphoneNote.textContent = "";
   const savedId = getPreferredMicDeviceId();
   let populated = false;
   try {
@@ -1973,18 +1930,18 @@ async function openLocalSttMicStream() {
 }
 
 async function startLocalStt() {
-  localStt.active = true;
-  setMicStatus("STARTING");
-  setSpeechStatus("STARTING");
-  setStreamStatus("STARTING", true);
-
-  const startResult = await window.practiceBridge?.startLocalStt();
-  if (!startResult?.ok) {
-    markLocalSttUnavailable(startResult?.error || "Local speech transcription could not start.");
-    return;
-  }
-
   try {
+    localStt.active = true;
+    setMicStatus("STARTING");
+    setSpeechStatus("STARTING");
+    setStreamStatus("STARTING", true);
+
+    const startResult = await window.practiceBridge?.startLocalStt();
+    if (!startResult?.ok) {
+      markLocalSttUnavailable(startResult?.error || "Local speech transcription could not start.");
+      return;
+    }
+
     const { stream, fellBack } = await openLocalSttMicStream();
     if (!localStt.active) {
       stream.getTracks().forEach((track) => track.stop());
@@ -1998,9 +1955,7 @@ async function startLocalStt() {
     setMicStatus("LISTENING");
     setSpeechStatus(localStt.modelReady ? "LISTENING" : "LOADING MODEL");
   } catch {
-    if (!localStt.active) return;
     markLocalSttUnavailable("The microphone could not be opened. Check the microphone permission and that no other app is using it.");
-    stopLocalStt();
   }
 }
 
@@ -2036,7 +1991,6 @@ function handleLocalSttResult(message) {
 }
 
 function stopCameraPreview() {
-  stopHeadDirectionTracking();
   if (cameraStream) {
     cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
@@ -2059,47 +2013,69 @@ function stopCameraPreview() {
 async function stopFreeSession(showMessage) {
   if (!sessionActive || sessionStopping) return;
   sessionStopping = true;
-  const partial = interimText.textContent.trim();
-  if (partial) {
-    appendUtterance(
-      partial,
-      "speech_recognition_partial",
-      elapsedMs(),
-      pendingSpeechStartMs ?? lastRecognitionAtMs,
-    );
-  }
-  // Transcribe the final seconds of mic audio before tearing the capture
-  // down; without this the tail of every session was discarded.
-  if (localStt.active) {
-    const tailId = sendLocalSttTail();
-    if (tailId !== null) await waitForLocalSttFlushDone(tailId, 15000);
-  }
-  sessionStoppedAt = performance.now();
-  sessionActive = false;
-  pendingSpeechStartMs = null;
-  stopRecognition();
-  stopLocalStt();
-  const cleanupSucceeded = await stopSmartSpectraTelemetry();
-  stopCameraPreview();
-  if (sessionClockTimer !== null) {
-    window.clearInterval(sessionClockTimer);
-    sessionClockTimer = null;
-  }
-  if (smartSpectraWatchdogTimer !== null) {
-    window.clearInterval(smartSpectraWatchdogTimer);
-    smartSpectraWatchdogTimer = null;
-  }
-  smartSpectraRecoveryInFlight = false;
-  sessionButton.textContent = "Resume Free Session";
-  sessionButton.classList.remove("is-recording");
-  consentInput.disabled = false;
-  setSpeechStatus("IDLE");
-  setMicStatus("OFF");
-  setStreamStatus("SESSION ENDED");
-  updateInterim("");
-  updateUtteranceCount();
-  if (showMessage && cleanupSucceeded) {
-    showToast("Session ended. Export the transcript and any connected raw sensor samples.");
+  try {
+    const partial = interimText.textContent.trim();
+    if (partial) {
+      appendUtterance(
+        partial,
+        "speech_recognition_partial",
+        elapsedMs(),
+        pendingSpeechStartMs ?? lastRecognitionAtMs,
+      );
+    }
+    // Transcribe the final seconds of mic audio before tearing the capture
+    // down; without this the tail of every session was discarded.
+    if (localStt.active) {
+      const tailId = sendLocalSttTail();
+      if (tailId !== null) await waitForLocalSttFlushDone(tailId, 15000);
+    }
+    sessionStoppedAt = performance.now();
+    sessionActive = false;
+    pendingSpeechStartMs = null;
+    stopRecognition();
+    stopLocalStt();
+    const cleanupSucceeded = await stopSmartSpectraTelemetry();
+    stopCameraPreview();
+    if (sessionClockTimer !== null) {
+      window.clearInterval(sessionClockTimer);
+      sessionClockTimer = null;
+    }
+    if (smartSpectraWatchdogTimer !== null) {
+      window.clearInterval(smartSpectraWatchdogTimer);
+      smartSpectraWatchdogTimer = null;
+    }
+    smartSpectraRecoveryInFlight = false;
+    sessionButton.textContent = "Start Free Session";
+    sessionButton.classList.remove("is-recording");
+    consentInput.disabled = false;
+    setSpeechStatus("IDLE");
+    setMicStatus("OFF");
+    setStreamStatus("SESSION ENDED");
+    updateInterim("");
+    updateUtteranceCount();
+    if (showMessage && cleanupSucceeded) {
+      showToast("Session ended. Export the transcript and any connected raw sensor samples.");
+    }
+  } catch {
+    sessionActive = false;
+    sessionStopping = false;
+    pendingSpeechStartMs = null;
+    stopRecognition();
+    stopLocalStt();
+    sessionStoppedAt = performance.now();
+    sessionButton.textContent = "Start Free Session";
+    sessionButton.classList.remove("is-recording");
+    consentInput.disabled = false;
+    setSpeechStatus("IDLE");
+    setMicStatus("OFF");
+    setStreamStatus("SESSION ENDED");
+    updateInterim("");
+    updateUtteranceCount();
+    if (showMessage) {
+      showToast("Session ended. Export the transcript and any connected raw sensor samples.", true);
+    }
+  } finally {
+    sessionStopping = false;
   }
 }
 
@@ -2306,7 +2282,7 @@ function recordHeadDirectionSample(sample, metadata = {}) {
 }
 
 function addHeadDirectionSample(sample) {
-  return recordHeadDirectionSample(sample, { source: "adapter_unvalidated" });
+  return recordHeadDirectionSample(sample, { source: HEAD_DIRECTION_SOURCE, calibrated: true });
 }
 
 function addBiometricSample(sample) {
@@ -2370,30 +2346,19 @@ function buildSessionData() {
   const biometricSamplesById = new Map(biometricSamples.map((sample) => [sample.sample_id, sample]));
   const cardioBaseline = computeCardioBaseline(biometricSamples);
   const { codes: requestedMetricCodes, names: requestedMetricNames } = getRequestedMetricInfo(activeSessionFeatures);
-  const trackerHeadDirectionSamples = headDirectionSamples.filter((sample) => sample.source === "head_direction");
-  const adapterHeadDirectionSamples = headDirectionSamples.filter((sample) => sample.source === "adapter_unvalidated");
-  const currentHeadDirectionDiagnostics = headDirectionTracker?.diagnostics ?? headDirectionTrackerDiagnostics;
-  const headDirectionTrackerStatus = currentHeadDirectionDiagnostics?.status === "stopped"
-    ? currentHeadDirectionDiagnostics.stopped_from_status
-    : currentHeadDirectionDiagnostics?.status;
-  let headDirectionTrackingStatus;
-  if (trackerHeadDirectionSamples.length) {
-    headDirectionTrackingStatus = "experimental_preview_relative_head_direction_estimates_recorded_nlp_mapping_disabled";
-  } else if (adapterHeadDirectionSamples.length) {
-    headDirectionTrackingStatus = "unvalidated_adapter_samples_received_no_head_direction_estimator";
-  } else if (!activeSessionFeatures.headDirection) {
-    headDirectionTrackingStatus = "disabled_by_user";
-  } else if (headDirectionTrackerStatus === "error") {
-    headDirectionTrackingStatus = "local_eye_tracker_unavailable";
-  } else if (headDirectionTrackerStatus === "no_camera") {
-    headDirectionTrackingStatus = "camera_unavailable_no_eye_tracking";
-  } else if (headDirectionTrackerStatus === "no_face") {
-    headDirectionTrackingStatus = "no_usable_eye_landmarks_received";
-  } else if (activeSessionFeatures.headDirection) {
-    headDirectionTrackingStatus = "experimental_tracker_running_no_estimates_yet";
-  } else {
-    headDirectionTrackingStatus = "not_started_no_head_direction_samples";
-  }
+  const trackerHeadDirectionSamples = headDirectionSamples.filter((sample) => sample.source === HEAD_DIRECTION_SOURCE && sample.calibrated === true);
+  const adapterHeadDirectionSamples = headDirectionSamples.filter((sample) => sample.source !== HEAD_DIRECTION_SOURCE || sample.calibrated !== true);
+  const landmarkSamplesReceived = headDirectionSamples.length > 0;
+  const headDirectionEstimatorStatus = landmarkSamplesReceived
+    ? "experimental_head_pose_landmarks_estimates_recorded_nlp_mapping_disabled"
+    : activeSessionFeatures.headDirection
+      ? "awaiting_smart_spectra_landmarks"
+      : "disabled_by_user";
+  const headDirectionCalibrationStatus = landmarkSamplesReceived
+    ? "sdk_stable_flag_provided"
+    : activeSessionFeatures.headDirection
+      ? "awaiting_smart_spectra_landmarks"
+      : "not_requested";
 
   return {
     session_metadata: {
@@ -2413,21 +2378,20 @@ function buildSessionData() {
       gaze_inversion_active: false,
       gaze_inversion_status: "not_applied_experimental_preview_relative_estimate",
       gaze_estimator: {
-        name: "WebGazer.js with MediaPipe FaceMesh",
-        runtime: "local",
-        tracking_status: headDirectionTrackerStatus ?? "disabled_by_user",
-        calibration_status: headDirectionTrackerStatus === "calibrated" ? "completed" : "self_calibrating_from_cursor_and_clicks",
-        calibration_fit_rms_error: currentHeadDirectionDiagnostics?.calibration_fit_rms_error ?? null,
+        name: "SmartSpectra SDK FACE_LANDMARKS",
+        runtime: "smartspectra_sdk",
+        tracking_status: headDirectionEstimatorStatus,
+        calibration_status: headDirectionCalibrationStatus,
         cognitive_classification: "disabled_not_validated",
-        diagnostics: currentHeadDirectionDiagnostics ? { ...currentHeadDirectionDiagnostics } : null,
+        diagnostics: null,
       },
     },
     utterance_telemetry_stream: utterances.map((utterance) => {
       const gazeAnalysis = buildHeadDirectionAnalysis(utterance, headDirectionSamples, handedness);
       if (!activeSessionFeatures.headDirection && !adapterHeadDirectionSamples.length) {
         gazeAnalysis.analysis_status = "head_direction_tracking_disabled_by_user";
-      } else if (activeSessionFeatures.headDirection && !trackerHeadDirectionSamples.length && !adapterHeadDirectionSamples.length) {
-        gazeAnalysis.analysis_status = "head_direction_tracker_running_no_estimates_yet";
+      } else if (activeSessionFeatures.headDirection && !trackerHeadDirectionSamples.length) {
+        gazeAnalysis.analysis_status = "no_calibrated_gaze_samples_in_utterance_window";
       }
 
       const derivedBiometrics = computeDerivedBiometrics(utterance, biometricSamplesById, cardioBaseline);
@@ -2507,14 +2471,14 @@ function buildSessionData() {
       face_speech_events: faceSpeechEvents,
       blink_events: blinkEvents,
     },
-    sample_provenance: {
+sample_provenance: {
       gaze: trackerHeadDirectionSamples.length
-        ? "Experimental preview-relative estimates from local MediaPipe iris landmarks; raw facial landmarks are not exported. Estimates are not validated, and NLP/cognitive classification remains disabled."
+        ? "Experimental head-pose landmark estimates recorded; NLP/cognitive classification remains disabled."
         : adapterHeadDirectionSamples.length
           ? "Unvalidated adapter coordinates only; head-direction vectors and cognitive classification are not computed."
-          : currentHeadDirectionDiagnostics?.error
-            ? `No head-direction estimates received; local head-direction tracker failed: ${currentHeadDirectionDiagnostics.error}`
-            : `No head-direction estimates received; tracker status: ${headDirectionTrackingStatus}.`,
+          : activeSessionFeatures.headDirection
+            ? "No head-direction estimates received; awaiting SmartSpectra landmark packets."
+            : "Head-direction tracking not requested; no gaze samples recorded.",
       presage_biometrics: biometricSamples.length
         ? "Raw blink-state observations and any enabled pulse/HRV observations. Pulse/HRV baselines use stable readings only; the paired cardio-response flag is a heuristic, not a stress diagnosis."
         : "No SmartSpectra metric samples received.",
@@ -2535,7 +2499,7 @@ function buildSessionData() {
       first_landmark_reset: faceMetricDiagnostics.first_landmark_reset,
       blink_transitions: faceMetricDiagnostics.blink_transitions,
       last_packet_ms: metricPacketDiagnostics.last_packet_ms,
-      note: "Blinking is requested by default. Pulse and HRV are optional. The local experimental head-direction tracker runs only when enabled; it requires calibration to emit head-direction estimates.",
+      note: "Blinking is requested by default. Pulse and HRV are optional. Head-direction estimates are derived from SmartSpectra face landmarks only when enabled; NLP/cognitive classification remains disabled.",
       errors: sessionSdkErrors,
       error_summary: smartSpectraErrorSummary(),
       pipeline_stalled: smartSpectraPacketsStalled(),
@@ -2552,10 +2516,10 @@ function buildSessionData() {
       processing_status_history: processingStatusHistory,
       sdk_log_level: "INFO",
     },
-source_status: {
+    source_status: {
       camera_preview: cameraPreviewWasConnected ? "connected_during_session_preview_only" : "not_connected",
       speech_recognition: speechMode,
-      gaze_tracking: headDirectionTrackingStatus,
+      gaze_tracking: headDirectionEstimatorStatus,
       presage_smartspectra: biometricSamples.length
         ? (smartSpectraPacketsStalled()
           ? "timestamped_samples_received_then_pipeline_stalled"
@@ -2565,7 +2529,7 @@ source_status: {
         ? "talking_packets_received_transitions_recorded"
         : "not_requested",
       smartspectra_face_landmarks: faceMetricDiagnostics.landmark_packets
-        ? "Landmark packets received for head-direction vectors not computed."
+        ? "landmark_packets_received_gaze_not_computed"
         : "not_requested",
       smartspectra_blinking: metricPacketDiagnostics.blink_packets
         ? "blink_packets_received"
@@ -2667,8 +2631,8 @@ function buildTurnGroups() {
         nlp_classification: null,
         analysis_status: !activeSessionFeatures.headDirection
           ? "head_direction_tracking_disabled_by_user"
-          : headDirectionSamples.some((sample) => sample.source === "mediapipe_iris_tracker")
-            ? "disabled_experimental_head_direction_not_validated"
+          : headDirectionSamples.some((sample) => sample.source === HEAD_DIRECTION_SOURCE && sample.calibrated === true)
+            ? "disabled_experimental_gaze_not_validated"
             : "head_direction_tracker_requires_calibration_no_estimates",
       },
       sample_count: metrics.sampleCount,

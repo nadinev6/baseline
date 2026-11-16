@@ -6,9 +6,9 @@ const CARDIO_BASELINE_MIN_SAMPLES = 3;
 const CARDIO_BASELINE_MIN_SPAN_MS = 15_000;
 
 const {
-  classifyPreviewDirection,
   buildHeadDirectionAnalysis,
   HEAD_DIRECTION_SOURCE,
+  headDirectionFromLandmarks,
 } = require("./gaze-estimation");
 
 function hasPositiveMeasurement(value) {
@@ -98,6 +98,7 @@ function computeCardioResponse(pulseDeltaBpm, hrvDeltaMs) {
 
 function buildRequestedMetrics(features, metricType) {
   const requested = [metricType.BLINKING];
+  if (features.headDirection) requested.push(metricType.FACE_LANDMARKS);
   if (features.pulse) requested.push(metricType.PULSE_RATE);
   if (features.hrv) requested.push(metricType.HRV);
   return requested;
