@@ -1,6 +1,12 @@
 /* Zen / shadcn theme — colors come from index.css oklch tokens.
    Brutalist theme removed; every surface now uses shadcn design tokens. */
 
+:root {
+    --font-sans: "Arial", sans-serif;
+    --font-serif: "Arial", sans-serif;
+    --font-mono: "Courier New", monospace;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -841,6 +847,8 @@ body {
 #headDirection-value {
     max-width: 100%;
     overflow-wrap: break-word;
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
 }
 
 .session-review {

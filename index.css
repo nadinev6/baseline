@@ -34,7 +34,7 @@
   --sidebar-accent-foreground: oklch(0.3012 0 0);
   --sidebar-border: oklch(0.8434 0.0231 87.1621);
   --sidebar-ring: oklch(0.3012 0 0);
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Arial", sans-serif;
   --font-serif: "Playfair Display", serif;
   --font-mono: "JetBrains Mono", monospace;
   --radius: 0.5rem;
