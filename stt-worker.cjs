@@ -149,6 +149,8 @@ rl.on("line", (line) => {
   }
   if (message.type === "start") {
     out({ type: "started" });
+    // Eagerly load the model on first start so the first flush can process without delay
+    if (!modelReadyReported) loadModel().catch(() => {});
   } else if (message.type === "audio") {
     if (Array.isArray(message.samples)) accumulate(message.samples);
   } else if (message.type === "flush") {
