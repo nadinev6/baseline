@@ -509,6 +509,7 @@ body {
     position: relative;
     flex: 1;
     min-height: 220px;
+    aspect-ratio: 16 / 9;
     border-radius: 5px;
     background: var(--bg-color);
     border: 2px solid var(--main-color);
@@ -629,6 +630,14 @@ body {
     font-family: var(--font-display);
     font-size: 14px;
     color: var(--font-color);
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.2;
+}
+
+#headDirection-value {
+    max-width: 100%;
+    overflow-wrap: break-word;
 }
 
 .session-review {

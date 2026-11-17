@@ -125,7 +125,7 @@ function createApplicationMenu() {
         },
         {
           id: "feature-head-direction",
-          label: "Experimental head direction tracking (calibration required)",
+          label: "Experimental head direction tracking",
           type: "checkbox",
           checked: false,
           click: (item) => sendToRenderer("practice:sensor-feature-toggle", {
@@ -151,10 +151,15 @@ function createApplicationMenu() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 700,
+    width: 1280,
+    height: 720,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    minWidth: 1280,
+    minHeight: 720,
+    maxWidth: 1280,
+    maxHeight: 720,
     icon: path.join(__dirname, "icon.png"),
     backgroundColor: "#e4e9ee",
     webPreferences: {

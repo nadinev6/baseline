@@ -143,11 +143,13 @@ const MIC_PREFERENCE_KEY = "baseline.micDeviceId";
 const CAMERA_PREFERENCE_KEY = "baseline.cameraDeviceId";
 // Lower resolution reduces the renderer-to-main frame-copy cost while keeping
 // enough detail for face metrics; request 50 fps to run the 50 fps camera at
-// its native rate (above the SDK's 25 fps floor).
+// its native rate (above the SDK's 25 fps floor). Exact constraints keep the
+// capture at a fixed 1280x720 so the app window never has to stretch.
 const CAMERA_CAPTURE_CONSTRAINTS = {
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
-  frameRate: { ideal: 50 },
+  width: { exact: 1280 },
+  height: { exact: 720 },
+  aspectRatio: { exact: 16 / 9 },
+  frameRate: { exact: 30 },
 };
 const cameraDialogPreview = { stream: null };
 const micMeter = { stream: null, context: null, source: null, analyser: null, buffer: null, frame: 0 };
@@ -350,7 +352,8 @@ function markHeadDirectionTrackerNoCamera() {
     estimates_emitted: 0,
     error: null,
   };
-  headDirectionValue.textContent = "CAMERA OFF";
+  headDirectionValue.textContent = "—";
+  headDirectionValue.title = "No camera";
 }
 
 function setHeadDirectionTrackingDisabled() {
@@ -392,7 +395,8 @@ function setHeadDirectionPreviewStatus() {
       estimates_emitted: 0,
       error: null,
     };
-    headDirectionValue.textContent = "AWAITING SMARTSPECTRA";
+    headDirectionValue.textContent = "—";
+    headDirectionValue.title = "Awaiting SmartSpectra landmarks…";
   } else {
     setHeadDirectionTrackingDisabled();
   }
