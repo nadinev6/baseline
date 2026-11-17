@@ -806,7 +806,7 @@ function addSmartSpectraMetrics(buffer, timestampUs) {
         { ...headDirection, timestamp_ms: sample.timestamp_ms, calibrated: true },
         { source: "smartspectra_landmarks", calibrated: true },
       );
-      if (headDirectionValue.textContent !== "LANDMARKS") headDirectionValue.textContent = "LANDMARKS";
+      if (headDirectionValue.textContent !== headDirection) headDirectionValue.textContent = headDirection;
     }
   }
 }
