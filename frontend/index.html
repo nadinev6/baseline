@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#d3d3d3">
     <meta name="description" content="A free-flow practice session with live transcript and timestamped sensor observations.">
-    <title>Free Practice Session // Baseline</title>
+    <title>Free Practice Session // Baseline CogniSync</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Dela+Gothic+One&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="app.css">
     <script src="dist/app.bundle.js" defer></script>
@@ -78,23 +79,49 @@
                         </div>
                     </div>
 
-                    <div class="camera-stage" id="camera-stage">
-                        <div class="framing-guide" aria-hidden="true"></div>
-                        <div class="framing-guide-label">CENTER FACE HERE</div>
-                        <video id="camera-video" autoplay muted playsinline aria-label="Local camera preview"></video>
-                        <div id="camera-placeholder" class="camera-placeholder">
-                            <div class="camera-placeholder-icon" aria-hidden="true">◎</div>
-                            <p>Camera preview is off</p>
+                    <div id="data-pane" class="data-pane">
+                        <div class="data-pane-header">
+                            <div class="data-pane-title">
+                                <svg class="data-pane-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                <span>Session Data</span>
+                                <span id="data-pane-status" class="data-pane-status">IDLE</span>
+                            </div>
+                            <div class="data-pane-header-actions">
+                                <div class="data-pane-tabs" role="tablist" aria-label="Data view">
+                                    <button class="data-pane-tab" type="button" role="tab" aria-selected="false" data-view="preview" aria-controls="camera-stage">Camera</button>
+                                    <button class="data-pane-tab" type="button" role="tab" aria-selected="true" data-view="rich-text" aria-controls="data-pane-rich-text">Signal</button>
+                                    <button class="data-pane-tab" type="button" role="tab" aria-selected="false" data-view="json" aria-controls="data-pane-json">JSON</button>
+                                </div>
+                                <button id="export-button" class="action-btn export-button data-pane-export" type="button" disabled>Export JSON</button>
+                            </div>
                         </div>
-                        <div class="camera-corner camera-corner-tl"></div>
-                        <div class="camera-corner camera-corner-tr"></div>
-                        <div class="camera-corner camera-corner-bl"></div>
-                        <div class="camera-corner camera-corner-br"></div>
-                        <div id="camera-error" class="camera-error" role="status" aria-live="polite"></div>
-                        <canvas id="head-direction-canvas" class="head-direction-canvas"></canvas>
-                        <div id="head-direction-dot" class="head-direction-dot" aria-hidden="true"></div>
+                        <div class="data-pane-search">
+                            <svg class="data-pane-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" id="data-pane-search" class="data-pane-search-input" placeholder="Filter by keyword, signal, or time range…" aria-label="Search data pane" autocomplete="off" spellcheck="false">
+                            <button id="data-pane-search-clear" class="data-pane-search-clear" type="button" aria-label="Clear search" hidden>×</button>
+                            <span id="data-pane-search-count" class="data-pane-search-count" aria-live="polite" hidden>0</span>
+                        </div>
+                        <div id="data-pane-content" class="data-pane-content">
+                            <div id="camera-stage" class="data-pane-view camera-stage" hidden>
+                                <video id="camera-video" autoplay muted playsinline aria-label="Local camera preview"></video>
+                                <div id="camera-placeholder" class="camera-placeholder" hidden>
+                                    <div class="camera-placeholder-icon" aria-hidden="true">◎</div>
+                                    <p>Camera preview is off</p>
+                                </div>
+                                <div id="camera-error" class="camera-error" role="status" aria-live="polite"></div>
+                                <canvas id="head-direction-canvas" class="head-direction-canvas"></canvas>
+                                <div id="head-direction-dot" class="head-direction-dot" aria-hidden="true"></div>
+                            </div>
+                            <div id="data-pane-rich-text" class="data-pane-view is-active" role="tabpanel">
+                                <div class="data-pane-empty">
+                                    <div class="data-pane-empty-icon" aria-hidden="true">◎</div>
+                                    <p>Session interpretation will appear here</p>
+                                    <span>Start a free session to stream live JSON and rich-text analysis.</span>
+                                </div>
+                            </div>
+                            <pre id="data-pane-json" class="data-pane-view" role="tabpanel" hidden><code class="data-pane-code">No session data</code></pre>
+                        </div>
                     </div>
-
                     <div class="telemetry-grid" aria-label="Current transcript and sensor readings">
                         <div class="telemetry-cell">
                             <span>BLINK EVENTS</span>
@@ -112,13 +139,11 @@
                             <span>HRV</span>
                             <strong id="hrv-value">OFF</strong>
                         </div>
-                    </div>
-
-                    <footer class="session-review">
-                        <div class="review-actions">
-                            <button id="export-button" class="action-btn export-button" type="button" disabled>Export JSON</button>
+                        <div class="telemetry-cell">
+                            <span>TALKING</span>
+                            <strong id="talking-value">OFF</strong>
                         </div>
-                    </footer>
+                    </div>
                 </section>
             </main>
         </div>
@@ -196,7 +221,7 @@
             <div class="info-header">
                 <img src="../icon.png" alt="" class="about-icon">
                 <div>
-                    <h2 id="information-title">About Baseline</h2>
+                    <h2 id="information-title">About Baseline CogniSync</h2>
                     <p class="info-version">Free-flow practice · Local workspace · v0.1.0</p>
                 </div>
             </div>
@@ -219,7 +244,7 @@
                     </div>
                     <div class="info-row">
                         <dt>SmartSpectra</dt>
-                        <dd>Blink detection is requested by default. Optional pulse rate and HRV RMSSD can be enabled in Features; only selected SDK metrics are requested. Feature changes apply to a new app session, so restart Baseline after ending the current session. The experimental head-direction estimate is derived from SmartSpectra face landmarks and emits preview-relative direction vectors with NLP/cognitive labels once available; NLP/cognitive classification remains disabled. The app computes only coarse word-per-minute pacing from approximate transcript timing; semantic text scores and acoustic prosody are not yet calculated. SDK errors and validation statuses are exported, retryable engine failures restart the pipeline automatically (at most twice per session), and a 10 s packet gap turns the sensor chip to STALLED. Cognitive-state labels are not calculated.</dd>
+                        <dd>Blink detection is requested by default. Optional pulse rate and HRV RMSSD can be enabled in Features; only selected SDK metrics are requested. Feature changes apply to a new app session, so restart Baseline CogniSync after ending the current session. The experimental head-direction estimate is derived from SmartSpectra face landmarks and emits preview-relative direction vectors with NLP/cognitive labels once available; NLP/cognitive classification remains disabled. The app computes only coarse word-per-minute pacing from approximate transcript timing; semantic text scores and acoustic prosody are not yet calculated. SDK errors and validation statuses are exported, retryable engine failures restart the pipeline automatically (at most twice per session), and a 10 s packet gap turns the sensor chip to STALLED. Cognitive-state labels are not calculated.</dd>
                     </div>
                     <div class="info-row">
                         <dt>API key</dt>
@@ -348,7 +373,7 @@
                     <pre class="info-code"><code>{
   "session_metadata": {
     "session_id": "8820-XF",
-    "app_name": "Baseline",
+    "app_name": "Baseline CogniSync",
     "timestamp_iso": "2026-11-09T12:43:00Z",
     "handedness_setting": "RIGHT",
     "gaze_inversion_active": false

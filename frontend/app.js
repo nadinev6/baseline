@@ -190,6 +190,7 @@ let blinkCounter = 0;
 // Face-metric diagnostics remain in the export schema, but face metrics are
 // intentionally limited to the requested blink metric and optional head-direction tracker.
 let lastTalkingDetected = null;
+let latestTalking = null;
 let lastBlinkDetected = null;
 // One-shot per-session terminal confirmations that the SDK is emitting data.
 let firstMetricsLogged = false;
@@ -831,6 +832,7 @@ function trackTalkingTransition(sample) {
   faceSpeechEvents.push(event);
   faceMetricDiagnostics.talking_transitions += 1;
   faceMetricDiagnostics.last_talking_detected = detected;
+  latestTalking = { detected, stable: sample.talking_stable };
   logTelemetry(
     `talking ${isTransition ? "transition" : "first observation"}: ` +
       `detected=${detected} stable=${sample.talking_stable} at ${sample.timestamp_ms} ms ` +
@@ -1349,6 +1351,8 @@ async function startFreeSession() {
   sessionActive = true;
   sessionStopping = false;
   sessionStoppedAt = null;
+  // Update data pane status when session starts
+  if (dataPaneStatus) dataPaneStatus.textContent = "ACTIVE";
   if (sessionOrigin === null) {
     sessionOrigin = performance.now();
     sessionStartedAt = new Date().toISOString();
@@ -2100,6 +2104,18 @@ function updateTelemetry() {
   $("#blink-value").textContent = String(
     blinkEvents.filter((event) => event.counted_as_blink === true).length,
   );
+  const talkingEl = $("#talking-value");
+  if (displayedFeatures?.talking) {
+    if (latestTalking && latestTalking.stable) {
+      talkingEl.innerHTML = `<span class="talking-badge is-stable">TALKING ACTIVE STABLE</span>`;
+    } else if (latestTalking) {
+      talkingEl.innerHTML = `<span class="talking-badge is-active">TALKING ACTIVE</span>`;
+    } else {
+      talkingEl.innerHTML = `<span class="talking-badge is-off">LISTENING OFF</span>`;
+    }
+  } else {
+    talkingEl.innerHTML = `<span class="talking-badge is-off">OFF</span>`;
+  }
   $("#pulse-value").innerHTML = !displayedFeatures.pulse
     ? "OFF"
     : latestPulse
@@ -2847,6 +2863,207 @@ if (window.practiceBridge?.onSensorFeatureToggle) {
   });
 }
 updateTelemetry();
+
+// Data pane view switching (Preview / Signals / JSON)
+const dataPaneViewBtns = document.querySelectorAll(".data-pane-tab");
+const dataPaneRichText = document.getElementById("data-pane-rich-text");
+const dataPaneJson = document.getElementById("data-pane-json");
+const dataPaneJsonCode = dataPaneJson?.querySelector(".data-pane-code");
+const dataPaneStatus = document.getElementById("data-pane-status");
+
+const cameraStageView = document.getElementById("camera-stage");
+const dataPaneSearchBar = document.querySelector(".data-pane-search");
+const telemetryGridEl = document.querySelector(".telemetry-grid");
+
+function switchDataPaneView(view) {
+  dataPaneViewBtns.forEach((b) => {
+    const selected = b.dataset.view === view;
+    b.classList.toggle("is-active", selected);
+    b.setAttribute("aria-selected", String(selected));
+  });
+  if (cameraStageView) cameraStageView.hidden = view !== "preview";
+  if (dataPaneRichText) dataPaneRichText.hidden = view !== "rich-text";
+  if (dataPaneJson) dataPaneJson.hidden = view !== "json";
+  // Search only applies to the data views, not the camera preview.
+  if (dataPaneSearchBar) dataPaneSearchBar.hidden = view === "preview";
+  // Live telemetry signals are shown only on the camera preview tab.
+  if (telemetryGridEl) telemetryGridEl.hidden = view !== "preview";
+  if (view === "rich-text") {
+    renderRichText();
+  } else if (view === "json") {
+    if (sessionActive) {
+      exportSession();
+    } else if (dataPaneJsonCode) {
+      dataPaneJsonCode.textContent = "No session data";
+    }
+  }
+}
+
+// Initialize the default view (Signals) on load.
+switchDataPaneView("rich-text");
+
+dataPaneViewBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    switchDataPaneView(btn.dataset.view || "rich-text");
+  });
+});
+
+const dataPaneSearch = document.getElementById("data-pane-search");
+const dataPaneSearchClear = document.getElementById("data-pane-search-clear");
+const dataPaneSearchCount = document.getElementById("data-pane-search-count");
+
+function renderDataPaneSearchResults() {
+  if (!dataPaneRichText) return;
+  const entries = dataPaneRichText.querySelectorAll(".rich-text-entry");
+  const query = (dataPaneSearch?.value || "").trim().toLowerCase();
+  let visibleCount = 0;
+  entries.forEach((entry) => {
+    const transcript = (entry.querySelector(".rich-text-transcript")?.textContent || "").toLowerCase();
+    const signals = Array.from(entry.querySelectorAll(".rich-text-badge")).map((b) => (b.textContent || "").toLowerCase()).join(" ");
+    const match = query === "" || transcript.includes(query) || signals.includes(query);
+    entry.style.display = match ? "grid" : "none";
+    if (match) visibleCount += 1;
+  });
+  if (dataPaneSearchCount) {
+    dataPaneSearchCount.textContent = String(visibleCount);
+    dataPaneSearchCount.hidden = visibleCount === 0;
+  }
+}
+
+if (dataPaneSearch) {
+  dataPaneSearch.addEventListener("input", renderDataPaneSearchResults);
+  dataPaneSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      dataPaneSearch.value = "";
+      renderDataPaneSearchResults();
+      dataPaneSearch.focus();
+    }
+  });
+}
+
+if (dataPaneSearchClear) {
+  dataPaneSearchClear.addEventListener("click", () => {
+    dataPaneSearch.value = "";
+    renderDataPaneSearchResults();
+    dataPaneSearch.focus();
+  });
+}
+
+const dataPaneExportBtn = document.querySelector(".data-pane-export");
+if (dataPaneExportBtn && !dataPaneExportBtn.hasAttribute("data-bound")) {
+  dataPaneExportBtn.setAttribute("data-bound", "true");
+  dataPaneExportBtn.addEventListener("click", () => {
+    if (sessionActive) {
+      exportSession();
+    } else {
+      showToast("Start a session to export JSON data.");
+    }
+  });
+}
+
+function renderRichText() {
+  if (!dataPaneRichText) return;
+  dataPaneRichText.innerHTML = "";
+  const entries = [];
+  if (blinkEvents.length > 0) {
+    const latest = blinkEvents[blinkEvents.length - 1];
+    entries.push({
+      time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      type: "blink",
+      stable: latest.counted_as_blink === true,
+      transcript: `Blink event ${latest.event_id ?? ""}: ${latest.counted_as_blink ? "stable" : "unstable"} blink`,
+      details: `counted_as_blink: ${latest.counted_as_blink === true}`,
+      badge: `<span class="rich-text-badge rich-text-badge--blink">${latest.counted_as_blink ? "BLINK (STABLE)" : "BLINK (UNSTABLE)"}</span>`,
+    });
+  }
+  if (biometricSamples.length > 0) {
+    const latestPulse = [...biometricSamples].reverse().find((s) => s.pulse_stable === true && s.pulse_bpm);
+    if (latestPulse) {
+      entries.push({
+        time: new Date(latestPulse.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        type: "pulse",
+        stable: true,
+        transcript: `Pulse rate ${latestPulse.pulse_bpm.toFixed(1)} BPM`,
+        details: `event ${latestPulse.event_id ?? "N/A"}: ${latestPulse.pulse_bpm.toFixed(1)} BPM`,
+        badge: `<span class="rich-text-badge rich-text-badge--pulse">${latestPulse.pulse_stable ? "PULSE (STABLE)" : "PULSE (UNSTABLE)"}</span>`,
+      });
+    }
+    const latestHrv = [...biometricSamples].reverse().find((s) => s.hrv_stable === true && s.hrv_ms);
+    if (latestHrv) {
+      entries.push({
+        time: new Date(latestHrv.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        type: "hrv",
+        stable: true,
+        transcript: `HRV ${latestHrv.hrv_ms.toFixed(1)} MS`,
+        details: `event ${latestHrv.event_id ?? "N/A"}: ${latestHrv.hrv_ms.toFixed(1)} MS`,
+        badge: `<span class="rich-text-badge rich-text-badge--hrv">${latestHrv.hrv_stable ? "HRV (STABLE)" : "HRV (UNSTABLE)"}</span>`,
+      });
+    }
+  }
+  if (handednessHistory.length > 0) {
+    const latest = handednessHistory[handednessHistory.length - 1];
+    entries.push({
+      time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      type: "head-direction",
+      stable: true,
+      transcript: `Head direction: ${latest.preference}`,
+      details: `preference: ${latest.preference}`,
+      badge: `<span class="rich-text-badge rich-text-badge--direction">${latest.preference}</span>`,
+    });
+  }
+  if (faceSpeechEvents.length > 0) {
+    const latest = faceSpeechEvents[faceSpeechEvents.length - 1];
+    const talkingText = latest.detected ? (latest.stable ? "TALKING STABLE" : "TALKING") : "LISTENING";
+    const talkingClass = latest.detected ? (latest.stable ? "rich-text-badge--talking-stable" : "rich-text-badge--talking-active") : "rich-text-badge--talking-off";
+    entries.push({
+      time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      type: "talking",
+      stable: latest.stable,
+      transcript: talkingText,
+      details: `${latest.event_id ?? "N/A"}: detected=${latest.detected}, stable=${latest.stable}`,
+      badge: `<span class="rich-text-badge ${talkingClass}">${talkingText}</span>`,
+    });
+  }
+  if (entries.length === 0) {
+    dataPaneRichText.innerHTML = `
+      <div class="rich-text-empty">
+        <div class="rich-text-empty-icon" aria-hidden="true">◎</div>
+        <p>No session data</p>
+        <span>Start a free session to stream live JSON and rich-text analysis.</span>
+      </div>
+    `;
+    return;
+  }
+  entries.forEach((entry) => {
+    const el = document.createElement("div");
+    el.className = "rich-text-entry";
+    el.innerHTML = `
+      <div class="rich-text-time">${entry.time}</div>
+      <div class="rich-text-content">
+        <div class="rich-text-transcript">${entry.transcript}</div>
+        <div class="rich-text-signals">
+          ${entry.badge || `<span class="rich-text-badge rich-text-badge--${entry.type}">${entry.type.toUpperCase()}</span>`}
+          <span class="rich-text-badge rich-text-badge--info">${entry.details}</span>
+        </div>
+      </div>
+    `;
+    dataPaneRichText.appendChild(el);
+  });
+}
+
+if (dataPaneStatus) {
+  const updateDataPaneStatus = () => {
+    if (dataPaneStatus) dataPaneStatus.textContent = sessionActive ? "ACTIVE" : "IDLE";
+  };
+  updateDataPaneStatus();
+  // Re-sync status after session start/stop through the existing lifecycle hooks
+  const originalStopSession = stopSession;
+  stopSession = ((...args) => {
+    const result = originalStopSession(...args);
+    updateDataPaneStatus();
+    return result;
+  });
+}
 
 if (window.practiceBridge?.onLocalSttResult) {
   window.practiceBridge.onLocalSttResult(handleLocalSttResult);

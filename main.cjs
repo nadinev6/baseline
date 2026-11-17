@@ -76,15 +76,6 @@ function createApplicationMenu() {
             }
           },
         },
-        {
-          label: "Video File…",
-          accelerator: "CmdOrCtrl+Shift+V",
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send("practice:show-video-settings");
-            }
-          },
-        },
         { type: "separator" },
         { role: "quit" },
       ],
@@ -125,7 +116,7 @@ function createApplicationMenu() {
         },
         {
           id: "feature-head-direction",
-          label: "Experimental head direction tracking",
+          label: "Head tracking",
           type: "checkbox",
           checked: false,
           click: (item) => sendToRenderer("practice:sensor-feature-toggle", {

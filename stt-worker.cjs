@@ -1,6 +1,6 @@
 "use strict";
 
-// Local speech-to-text worker for the Baseline desktop app.
+// Local speech-to-text worker for the Baseline CogniSync desktop app.
 // Runs under the system Node.js runtime (not Electron) so the ONNX runtime's
 // native bindings match the host Node ABI. Communicates over stdin/stdout:
 //   in:  {"type":"start"} | {"type":"audio","samples":number[]} |

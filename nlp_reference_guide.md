@@ -1,6 +1,6 @@
 # NLP Eye-Accessing Cues & Telemetry Reference Guide
 
-*Specification Version: BASELINE-NLP-1.0*
+*Specification Version: BASELINE-COGNISYNC-NLP-1.0*
 
 *Target Schema: Post-Hoc Cognitive Load & Telemetry JSON Mapper*
 
@@ -31,7 +31,7 @@
 | `K` | `DOWN_LEFT` | Down-Right | **Kinesthetic / Tactile** | Processing bodily sensations, visceral emotions, tactile memories, or physical feelings. | Internal Feeling | 
 | `Ai` | `DOWN_RIGHT` | Down-Left | **Auditory Internal** | Engaging in internal monologue, self-talk, or deliberating specific wording prior to speaking. | Internal Processing | 
 
-## 2. SmartSpectra Cardio Measurements
+## 2. SmartSpectra Cardio & Face Measurements
 
 The app requests `BLINKING` by default. `PULSE_RATE` and `HRV` can be enabled
 independently in the Electron Features menu. Other SmartSpectra metrics,
@@ -39,6 +39,28 @@ including face landmarks, talking, expressions, and arterial pressure trace,
 are not requested. Missing readings remain `null`/omitted, not zero. Pulse
 generally needs about 12 seconds and HRV about 60 seconds of measurement before
 the SDK may emit a value; these are indicative minimums, not guarantees.
+
+### Talking (SDK Voice-Activity Detection)
+
+The SmartSpectra `face.talking` metric emits a per-packet `talking_detected`
+boolean (and a stability flag). Baseline records every talking state change as
+a face-speech event and exposes it in three places:
+
+| Surface | Field | Meaning |
+|---------|-------|---------|
+| Export JSON | `talking_detected` | Boolean; `true` when the SDK reports talking in that packet |
+| Export JSON | `talking_stable` | Boolean; `true` when the talking state is stable (non-noisy) |
+| Session diagnostics | `smartspectra_talking` | `talking_packets_received_transitions_recorded` or `unavailable_no_face_talking_packets` |
+| Telemetry grid | `TALKING` cell | Live view: `ACTIVE` / `ACTIVE STABLE` / `OFF` |
+| Rich Text | Speech badge | Green `TALKING` (stable), amber `TALKING` (active), gray `LISTENING` (off) |
+
+**Caveat:** Talking detection is **packet-quantized** (~30 fps), not a measured
+audio speech onset. A brief talking burst could be missed if the packet
+interval is sparse. The export note
+`raw_smartspectra_talking_transitions_window_correlated_not_a_measured_speech_onset`
+records this distinction. Baseline uses talking as a **native VAD tied to
+landmarks** to avoid transcribing other speakers; background noise is recorded
+as `talking_detected: false` for transparency.
 
 Stable rising blink-detection transitions are exported as events. Per-utterance
 blink counts/rates are calculated over approximate transcript-result windows;
@@ -119,7 +141,7 @@ The following is a hypothetical schema example, not the current app output.
 {
   "session_metadata": {
     "session_id": "8820-XF",
-    "app_name": "Baseline",
+    "app_name": "Baseline CogniSync",
     "timestamp_iso": "2026-11-09T12:43:00Z",
     "handedness_setting": "RIGHT",
     "gaze_inversion_active": false
@@ -148,6 +170,8 @@ The following is a hypothetical schema example, not the current app output.
         "hrv_ms": null,
         "hrv_baseline_ms": null,
         "hrv_delta_ms": null,
+        "talking_detected": false,
+        "talking_stable": false,
         "analysis_status": "cardio_metrics_disabled"
       },
       "telemetry_flags": {

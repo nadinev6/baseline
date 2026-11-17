@@ -25,11 +25,6 @@ contextBridge.exposeInMainWorld("practiceBridge", Object.freeze({
     ipcRenderer.on("practice:show-camera-settings", listener);
     return () => ipcRenderer.removeListener("practice:show-camera-settings", listener);
   },
-  onShowVideoSettings: (callback) => {
-    const listener = () => callback();
-    ipcRenderer.on("practice:show-video-settings", listener);
-    return () => ipcRenderer.removeListener("practice:show-video-settings", listener);
-  },
   setSensorFeatureState: (features) => {
     if (!features || typeof features !== "object") return;
     ipcRenderer.send("practice:sensor-feature-state", {
