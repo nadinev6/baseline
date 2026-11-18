@@ -1,4 +1,4 @@
-# Baseline
+# Baseline CogniSync
 
 A lightweight Python package and Electron practice app for organizing transcript
 windows, blink events, and optional gaze or Presage SmartSpectra observations.
@@ -93,7 +93,7 @@ SDK is installed as an npm dependency and receives the same camera stream the
 app previews. Blink detection is requested by default. Pulse rate and HRV
 RMSSD are optional checkboxes under the Electron **Features** menu; only the
 selected metrics are requested. Feature changes apply to a new app session, so
-restart Baseline after ending the current session. Their available values and
+restart Baseline CogniSync after ending the current session. Their available values and
 confidence are recorded as timestamped observations, while missing values remain null/omitted.
 The session export includes enabled features, requested metric codes,
 per-packet metric availability, SDK processing states, and validation statuses
@@ -108,15 +108,22 @@ acoustic prosody.
 
 The optional experimental head-direction estimate is derived from SmartSpectra
 face landmarks (478-point FaceMesh landmarks returned by the SDK). It emits
-preview-relative screen-direction vectors once landmark packets are received;
-NLP/cognitive classification remains disabled. Enabling gaze in Features starts
-the estimate; it remains experimental and unvalidated. Direction vectors
-(`UP_LEFT`, `UP_RIGHT`, `DOWN_LEFT`, `DOWN_RIGHT`, `LATERAL_LEFT`, `LATERAL_RIGHT`)
-are mapped to NLP cue codes (`nlp_code`) and cognitive state types
-(`cognitive_type`) per the NLP reference guide using the subject handedness
-setting; results are flagged as an experimental preview-relative estimate, not a
-validated measurement. Coordinates supplied through the optional adapter remain
-marked as unvalidated and are not classified.
+preview-relative screen-direction vectors once landmark packets are received.
+Enabling gaze in Features starts the estimate; it remains experimental and
+unvalidated. Direction vectors (`UP_LEFT`, `UP_RIGHT`, `DOWN_LEFT`,
+`DOWN_RIGHT`, `LATERAL_LEFT`, `LATERAL_RIGHT`) are mapped to NLP cue codes
+(`nlp_code`) and cognitive state types (`cognitive_type`) per the NLP reference
+guide using the subject handedness setting; results are flagged as an
+experimental preview-relative estimate, not a validated measurement.
+
+Per-utterance classification uses the **peak-deviation outlier** across the
+500 ms lead-up before speech onset plus the utterance window, not a single
+pre-speech snapshot. The sample with the largest Euclidean magnitude
+`√(x² + y²)` is the primary classification source; the export also reports
+`during_utterance_direction`, `pre_speech_direction`, `peak_deviation`,
+`peak_sample_id`, `peak_vector`, and `variance_x`/`variance_y` for transparency.
+Coordinates supplied through the optional adapter remain marked as unvalidated
+and are not classified.
 
 If pulse and HRV are enabled and both channels have enough data, each uses the
 median of its first 30 seconds of stable readings as a within-session reference
@@ -165,16 +172,25 @@ diagnostic or a validated measure of cognitive state.
 ## Frontend capture and adapter
 
 The desktop UI is in `frontend\index.html`. Starting a free session opens the
-consent dialog, requests a video-only camera stream, and starts browser
-`SpeechRecognition` / `webkitSpeechRecognition` when available. Speech
-recognition support and audio processing depend on the Chromium build and
-browser service; some implementations may process audio outside the device.
-Transcript timestamps are approximate browser recognition-result windows, not
-word-level audio timestamps or a measured pre-speech window.
+consent dialog, requests a video-only camera stream, and starts speech
+transcription:
+
+- **Electron:** audio is transcribed locally by `stt-worker.cjs`, a Node worker
+  running `@xenova/transformers` with the `Xenova/whisper-tiny.en` model. Audio
+  is captured continuously with a `ScriptProcessorNode` and flushed to the
+  worker in 4 s windows. ([BLANK_AUDIO] transcription was previously caused by
+  `AnalyserNode` polling that dropped audio between reads; the continuous
+  capture fixes it.)
+- **Browser fallback:** browser `SpeechRecognition` / `webkitSpeechRecognition`
+  when available. Support and audio processing depend on the Chromium build and
+  browser service; some implementations may process audio outside the device.
+
+Transcript timestamps are approximate recognition-result windows, not word-level
+audio timestamps or a measured pre-speech window.
 
 The default session requests blink detection. Optional pulse, HRV, and
 experimental gaze tracking can be selected in the Electron **Features** menu;
-changes apply after restarting Baseline for a new app session. Gaze tracking runs locally but does not emit
+changes apply after restarting Baseline CogniSync for a new app session. Gaze tracking runs locally but does not emit
 estimates until calibrated, and this UI currently has no calibration controls.
 Only transcript text and coarse timing-based pacing are currently computed;
 semantic scores and acoustic prosody are not implemented.
@@ -212,7 +228,9 @@ The export follows the organization in `nlp_reference_guide.md`:
 - `session_metadata`: session identity, timing, handedness preference, and
   enabled feature selections and local gaze-estimator status.
 - `utterance_telemetry_stream`: utterance text and approximate times, linked
-  blink events, gaze samples, and any enabled pulse/HRV observations.
+  blink events, gaze samples, per-utterance `gaze_analysis` (peak-deviation
+  primary direction, during-utterance and pre-speech views, peak/outlier
+  metrics, variance), and any enabled pulse/HRV observations.
 - `sensor_samples`: timestamped blink events, gaze-adapter/tracker samples, and
   optional cardio samples. SDK errors and pipeline state remain in diagnostics.
 - `smartspectra_diagnostics`: camera track settings, requested metric codes,
@@ -221,10 +239,11 @@ The export follows the organization in `nlp_reference_guide.md`:
 - `sample_provenance` and `source_status`: source and analysis availability.
 
 Screen-relative gaze directions are experimental estimates, not validated
-eye-accessing cues. Missing gaze, semantic scores, NLP classification, and
-gaze-derived cognitive labels remain `null`; absent pulse/HRV measurements and
-their turn averages also remain `null`, never zero. A raw sample is not
-interpreted as evidence of a cognitive state.
+eye-accessing cues. Missing gaze, semantic scores, and acoustic prosody remain
+`null`; absent pulse/HRV measurements and their turn averages also remain
+`null`, never zero. A raw sample is not interpreted as evidence of a cognitive
+state. The NLP cue codes and cognitive types are experimental hypotheses per
+`nlp_reference_guide.md`, not validated measurements.
 
 ## Python API
 

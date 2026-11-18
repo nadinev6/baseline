@@ -20,7 +20,7 @@ const {
   extractBiometricReadings,
   hasPositiveMeasurement,
 } = require("./telemetry-analysis");
-const { headDirectionFromLandmarks, HEAD_DIRECTION_SOURCE } = require("./gaze-estimation");
+const { headDirectionFromLandmarks, mapDirection, HEAD_DIRECTION_SOURCE } = require("./gaze-estimation");
 
 const $ = (selector) => document.querySelector(selector);
 const SENSOR_FEATURE_PREFERENCE_KEY = "baseline.sensorFeatures";
@@ -127,6 +127,10 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const isElectronApp = /electron\//i.test(navigator.userAgent);
 const STT_FLUSH_MS = 4000;
 const STT_TARGET_RATE = 16000;
+// Capture uses a ScriptProcessorNode whose onaudioprocess fires for every
+// input block — a true continuous stream. (AnalyserNode polling was lossy:
+// fftSize=2048 at 44.1/48 kHz holds only ~42 ms, so a 128 ms poll discarded
+// ~86 ms between reads and produced fragmented, incoherent audio.)
 const localStt = {
   active: false,
   modelReady: false,
@@ -806,7 +810,9 @@ function addSmartSpectraMetrics(buffer, timestampUs) {
         { ...headDirection, timestamp_ms: sample.timestamp_ms, calibrated: true },
         { source: "smartspectra_landmarks", calibrated: true },
       );
-      if (headDirectionValue.textContent !== headDirection) headDirectionValue.textContent = headDirection;
+      const mapped = mapDirection(headDirection.x, headDirection.y, handedness);
+      const display = mapped.nlpCode ? `${mapped.nlpCode} · ${mapped.direction}` : mapped.direction;
+      if (headDirectionValue.textContent !== display) headDirectionValue.textContent = display;
     }
   }
 }
@@ -1381,6 +1387,8 @@ async function startFreeSession() {
   recognitionRetryCount = 0;
   silentWindowCount = 0;
   noSpeechToastShown = false;
+  localStt.downloadToastShown = false;
+  localStt.modelReady = false;
   sessionButton.textContent = "Stop Free Session";
   sessionButton.classList.add("is-recording");
   updateUtteranceCount();
@@ -1785,6 +1793,7 @@ function markSpeechHeard() {
 function flushLocalSttChunk(requestId = null) {
   if (!localStt.active) return;
   const now = elapsedMs();
+  console.log("[STT] flushLocalSttChunk: pcmCount=", localStt.pcmCount, "lastFlushAtMs=", localStt.lastFlushAtMs, "now=", now);
   if (localStt.lastFlushAtMs === null) {
     localStt.lastFlushAtMs = now;
     window.practiceBridge?.flushLocalStt(now, requestId);
@@ -1800,6 +1809,7 @@ function flushLocalSttChunk(requestId = null) {
   localStt.pcmCount = 0;
   const rate = localStt.audioContext?.sampleRate || STT_TARGET_RATE;
   const samples = resampleTo16k(raw, rate);
+  console.log("[STT] flushLocalSttChunk: raw length=", raw.length, "samples length=", samples.length, "rate=", rate);
   if (samples.length === 0) {
     window.practiceBridge?.flushLocalStt(now, requestId);
     return;
@@ -1902,13 +1912,17 @@ function resampleTo16k(source, fromRate) {
   return output;
 }
 
-function setupLocalSttAudioPipeline(stream) {
+async function setupLocalSttAudioPipeline(stream) {
   const audioContext = new AudioContext();
   localStt.audioContext = audioContext;
   if (audioContext.state === "suspended") {
-    void audioContext.resume();
+    await audioContext.resume();
   }
   const source = audioContext.createMediaStreamSource(stream);
+  // Use a ScriptProcessorNode for continuous capture. AnalyserNode polling only
+  // exposes the most recent fftSize samples per poll, so sampling it every
+  // 128 ms silently drops most audio and Whisper receives fragmented speech
+  // (which it transcribes as "[BLANK_AUDIO]").
   const processor = audioContext.createScriptProcessor(4096, 1, 1);
   localStt.processor = processor;
   processor.onaudioprocess = (event) => {
@@ -1918,7 +1932,13 @@ function setupLocalSttAudioPipeline(stream) {
     localStt.pcmCount += channel.length;
   };
   source.connect(processor);
-  processor.connect(audioContext.destination);
+  // ScriptProcessorNode must be connected to a destination to run, but the
+  // microphone signal should not be played back; a zero-gain node keeps the
+  // graph alive without echoing audio.
+  const silentGain = audioContext.createGain();
+  silentGain.gain.value = 0;
+  processor.connect(silentGain);
+  silentGain.connect(audioContext.destination);
   localStt.flushTimer = window.setInterval(flushLocalSttChunk, STT_FLUSH_MS);
 }
 
@@ -1944,19 +1964,23 @@ async function startLocalStt() {
     setSpeechStatus("STARTING");
     setStreamStatus("STARTING", true);
 
+    console.log("[STT] startLocalStt: calling practiceBridge.startLocalStt()");
     const startResult = await window.practiceBridge?.startLocalStt();
+    console.log("[STT] startLocalStt: startResult =", startResult);
     if (!startResult?.ok) {
       markLocalSttUnavailable(startResult?.error || "Local speech transcription could not start.");
       return;
     }
 
     const { stream, fellBack } = await openLocalSttMicStream();
+    console.log("[STT] startLocalStt: mic stream opened, fellBack =", fellBack);
     if (!localStt.active) {
       stream.getTracks().forEach((track) => track.stop());
       return;
     }
     localStt.micStream = stream;
-    setupLocalSttAudioPipeline(stream);
+    await setupLocalSttAudioPipeline(stream);
+    console.log("[STT] startLocalStt: audio pipeline set up");
     if (fellBack) {
       showToast("The saved microphone was unavailable, so the system default is in use. Pick another input under File › Microphone.", true);
     }
@@ -1968,6 +1992,7 @@ async function startLocalStt() {
 }
 
 function handleLocalSttResult(message) {
+  console.log("[STT] handleLocalSttResult:", message.type, message.message || message.text || "");
   if (!localStt.active && message.type !== "status") return;
   if (message.type === "ready") {
     localStt.modelReady = true;
@@ -3056,13 +3081,13 @@ if (dataPaneStatus) {
     if (dataPaneStatus) dataPaneStatus.textContent = sessionActive ? "ACTIVE" : "IDLE";
   };
   updateDataPaneStatus();
-  // Re-sync status after session start/stop through the existing lifecycle hooks
-  const originalStopSession = stopSession;
-  stopSession = ((...args) => {
-    const result = originalStopSession(...args);
+  // Re-sync status after session stop through the existing lifecycle hook
+  const originalStopFreeSession = stopFreeSession;
+  stopFreeSession = async (...args) => {
+    const result = await originalStopFreeSession(...args);
     updateDataPaneStatus();
     return result;
-  });
+  };
 }
 
 if (window.practiceBridge?.onLocalSttResult) {

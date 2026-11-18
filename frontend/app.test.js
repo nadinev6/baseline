@@ -52,10 +52,13 @@ test("reports calibrated head-direction sample with NLP mapping applied", () => 
       calibrated: true,
     },
   ]);
+  assert.equal(result.primary_direction, "UP_LEFT");
+  assert.equal(result.primary_nlp_code, "Vc");
+  assert.equal(result.primary_cognitive_type, "CONSTRUCTED");
   assert.equal(result.pre_speech_direction, "UP_LEFT");
   assert.equal(result.gaze_estimation_method, "experimental_head_pose_landmarks");
-  assert.equal(result.analysis_status, "experimental_preview_gaze_available_nlp_mapping_disabled");
-  assert.equal(result.pre_speech_vector, null);
+  assert.equal(result.analysis_status, "peak_deviation_classified");
+  assert.equal(result.peak_sample_id, "g-00002");
   assert.equal(result.nlp_code, "Vc");
   assert.equal(result.nlp_classification, "Visual Constructed");
   assert.equal(result.cognitive_type, "CONSTRUCTED");
@@ -65,7 +68,8 @@ test("reports calibrated head-direction sample in utterance window when not in p
   const result = buildHeadDirectionAnalysis(utterance, [
     { sample_id: "g-00004", timestamp_ms: 1500, x: 0.3, y: -0.3, source: HEAD_DIRECTION_SOURCE, calibrated: true },
   ]);
-  assert.equal(result.pre_speech_direction, "UP_RIGHT");
+  assert.equal(result.primary_direction, "UP_RIGHT");
+  assert.equal(result.pre_speech_direction, null);
   assert.equal(result.nlp_code, "Vr");
   assert.equal(result.cognitive_type, "REMEMBERED");
   assert.equal(result.gaze_sample_count, 1);
@@ -93,7 +97,7 @@ test("handedness inversion flips horizontal direction", () => {
   const result = buildHeadDirectionAnalysis(utterance, [
     { sample_id: "g-00006", timestamp_ms: 1000, x: -0.3, y: 0.2, source: HEAD_DIRECTION_SOURCE, calibrated: true },
   ], "left");
-  assert.equal(result.pre_speech_direction, "LATERAL_RIGHT");
+  assert.equal(result.primary_direction, "LATERAL_RIGHT");
   assert.equal(result.nlp_code, "Ar");
   assert.equal(result.cognitive_type, "REMEMBERED");
 });

@@ -7,6 +7,7 @@ const { bindSmartSpectraIpc } = require("@smartspectra/node-sdk/main");
 
 let mainWindow;
 let sttWorker = null;
+let isWorkerReady = false;
 let sensorFeatureMenuItems = new Map();
 
 // One app instance owns the session. Dual windows launched from terminals
@@ -35,6 +36,7 @@ function stopSttWorker() {
   if (!sttWorker) return;
   const worker = sttWorker;
   sttWorker = null;
+  isWorkerReady = false;
   try {
     worker.stdin.end();
   } catch {
@@ -213,9 +215,15 @@ function createWindow() {
 
   ipcMain.handle("practice:stt-start", (event) => {
     if (!isAppWindowSender(event)) return { ok: false, error: "Rejected." };
-    if (sttWorker) return { ok: true };
+    if (sttWorker) {
+      console.log("[STT/main] stt-start: worker already exists, returning ok");
+      isWorkerReady = true;
+      return { ok: true };
+    }
 
+    isWorkerReady = false;
     const cacheDir = path.join(app.getPath("userData"), "stt-models");
+    console.log("[STT/main] stt-start: spawning worker with cacheDir =", cacheDir);
     let worker;
     try {
       worker = spawn("node", [path.join(__dirname, "stt-worker.cjs"), cacheDir], {
@@ -223,19 +231,25 @@ function createWindow() {
         windowsHide: true,
       });
     } catch (error) {
+      console.error("[STT/main] stt-start: spawn failed:", error);
       return { ok: false, error: error && error.message ? error.message : String(error) };
     }
     sttWorker = worker;
+    console.log("[STT/main] stt-start: worker spawned, pid =", worker.pid);
 
     worker.on("error", (error) => {
+      console.error("[STT/main] worker error event:", error);
       sttWorker = null;
+      isWorkerReady = false;
       sendToRenderer("practice:stt-result", {
         type: "error",
         message: error && error.message ? error.message : String(error),
       });
     });
-    worker.on("exit", () => {
+    worker.on("exit", (code, signal) => {
+      console.log("[STT/main] worker exited, code =", code, "signal =", signal);
       sttWorker = null;
+      isWorkerReady = false;
     });
 
     let stdoutBuffer = "";
@@ -252,9 +266,29 @@ function createWindow() {
         } catch {
           continue;
         }
+        
+        if (message.type === "ready" || message.type === "started") {
+          isWorkerReady = true;
+        }
+
+        // Protocol-only stdout (diagnostics go to stderr). Avoid noisy
+        // re-logging of every final/interim/flush_done frame here; those are
+        // logged by the renderer handler instead.
+        if (
+          message.type !== "final" &&
+          message.type !== "interim" &&
+          message.type !== "flush_done"
+        ) {
+          console.log(
+            "[STT/main] worker stdout -> renderer:",
+            message.type,
+            message.message || message.text || "",
+          );
+        }
         sendToRenderer("practice:stt-result", message);
       }
     });
+
     worker.stderr.on("data", (chunk) => {
       process.stderr.write(`[stt-worker] ${chunk.toString()}`);
     });
@@ -263,17 +297,18 @@ function createWindow() {
     });
 
     worker.stdin.write(`${JSON.stringify({ type: "start" })}\n`);
+    console.log("[STT/main] stt-start: sent {type: 'start'} to worker");
     return { ok: true };
   });
 
   ipcMain.handle("practice:stt-audio", (event, samples, timeAbsMs) => {
-    if (!isAppWindowSender(event) || !sttWorker || !sttWorker.stdin.writable) return false;
+    if (!isAppWindowSender(event) || !sttWorker || !sttWorker.stdin.writable || !isWorkerReady) return false;
     sttWorker.stdin.write(`${JSON.stringify({ type: "audio", samples })}\n`);
     return true;
   });
 
   ipcMain.handle("practice:stt-flush", (event, timeAbsMs, requestId) => {
-    if (!isAppWindowSender(event) || !sttWorker || !sttWorker.stdin.writable) return false;
+    if (!isAppWindowSender(event) || !sttWorker || !sttWorker.stdin.writable || !isWorkerReady) return false;
     sttWorker.stdin.write(`${JSON.stringify({ type: "flush", timeAbsMs, requestId })}\n`);
     return true;
   });

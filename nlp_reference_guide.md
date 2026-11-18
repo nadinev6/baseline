@@ -1,6 +1,6 @@
 # NLP Eye-Accessing Cues & Telemetry Reference Guide
 
-*Specification Version: BASELINE-COGNISYNC-NLP-1.0*
+*Specification Version: BASELINE-COGNISYNC-NLP-2.0*
 
 *Target Schema: Post-Hoc Cognitive Load & Telemetry JSON Mapper*
 
@@ -83,33 +83,44 @@ semantic scores and acoustic prosody are also not currently computed.
 
 ### Rule A: Utterance-Head-Direction Association
 
-* **Window Activation (**$T_0 \to T_1$**):** Evaluate head direction vector during the **0ms to 500ms pre-speech window** prior to speech onset ($T_1$).
+The primary classification uses the **peak-deviation outlier** across the
+evaluation window (the 500 ms lead-up before speech onset plus the utterance
+window), not a single pre-speech snapshot. A resting, neutral head produces
+small deviations; taking the peak deviation isolates the actual movement event
+and avoids every utterance collapsing to `CENTER`. Variance is reported
+alongside the peak for jitter transparency.
 
-* **Primary Classification Assignment:**
+* **Window Activation:** Evaluate head direction vectors across the **500 ms lead-up window** prior to speech onset ($T_1$) **plus the utterance window** ($T_1$ to $T_{end}$).
+
+* **Primary Classification Assignment:** The sample with the maximum Euclidean deviation $\sqrt{x^2 + y^2}$ from center across the combined window is the "peak outlier." If that peak deviation $\ge$ 0.22 (the same threshold used by `directionCombo`), the vector is classified per the Directional Head Direction Matrix (§1); otherwise it is `CENTER`.
 
   * If Primary Vector == `Vc` OR `Ac`: Assign `cognitive_type: "CONSTRUCTED"`
-
   * If Primary Vector == `Vr` OR `Ar`: Assign `cognitive_type: "REMEMBERED"`
-
   * If Primary Vector == `K` OR `Ai`: Assign `cognitive_type: "INTERNAL_PROCESSING"`
 
 * **Analysis Status Codes:**
 
-  | Status | Description |
-  | ------ | ----------- |
-  | `pre_speech_direction_classified` | Pre-speech window (0-500ms before speech onset) contains a classifiable head-direction sample. |
-  | `utterance_window_direction_classified` | Pre-speech window empty, but utterance window (during speech) contains a classifiable head-direction sample. |
-  | `raw_coordinates_only_no_classifiable_samples` | Head-direction samples exist but are not classifiable (e.g., noisy landmarks, coordinates outside threshold). |
-  | `head_direction_samples_received_no_pre_speech_coverage` | Head-direction samples received but none fall into the pre-speech window and none in utterance window. |
-  | `no_head_direction_samples_received` | No head-direction samples received from the local tracker or adapter (tracker disabled, calibration unavailable, camera unavailable, or session too short). |
+| Status | Description |
+| ------ | ----------- |
+| `peak_deviation_classified` | Peak-deviation outlier in evaluation window classified (calibrated samples only). |
+| `no_gaze_samples_in_evaluation_window` | Calibrated samples exist but none fall into the lead-up or utterance window. |
+| `unvalidated_gaze_samples_not_classified` | Head-direction samples received (e.g., adapter) but none are calibrated. |
+| `gaze_estimator_not_configured` | No head-direction samples received (tracker disabled, calibration unavailable, camera unavailable, or session too short). |
 
 * **Head Direction Analysis Metadata:**
 
   Each utterance's `gaze_analysis` block includes:
-  * `gaze_sample_count`: Number of head-direction samples evaluated in the window.
-  * `pre_speech_direction`: Experimental preview-relative direction when a calibrated sample is available. This is not an NLP cue.
-  * `gaze_estimation_method`: `"experimental_preview_relative_mediapipe_iris_landmarks"` when a calibrated tracker sample is associated; never `"landmark_centroid"`.
-  * `nlp_code`, `nlp_classification`, and `cognitive_type`: remain `null`; these rules are not implemented.
+
+  * `primary_direction` / `primary_nlp_code` / `primary_classification` / `primary_cognitive_type` — the peak-deviation classification (primary).
+  * `peak_deviation` — the max $\sqrt{x^2+y^2}$ value in the evaluation window.
+  * `peak_sample_id` — the `sample_id` of the peak outlier.
+  * `peak_vector` — `{x, y}` of the peak outlier.
+  * `variance_x`, `variance_y` — variance of x/y across the evaluation window (jitter/noise transparency).
+  * `during_utterance_direction` / `during_utterance_nlp_code` / `during_utterance_classification` / `during_utterance_cognitive_type` — peak classification restricted to the utterance window only (transparency view).
+  * `pre_speech_direction` / `pre_speech_nlp_code` / `pre_speech_classification` / `pre_speech_cognitive_type` — peak classification restricted to the 500 ms lead-up window only (reference/backward-compat).
+  * `gaze_sample_count` — number of calibrated samples in the evaluation window.
+  * `gaze_estimation_method`: `"experimental_head_pose_landmarks"` when a calibrated tracker sample is associated; otherwise `"not_configured"`.
+  * Legacy aliases retained for downstream consumers: `nlp_code`, `nlp_classification`, `cognitive_type` (mirror `primary_*`).
 
 ### Rule B: Cardio-Response Candidate
 
@@ -153,15 +164,30 @@ The following is a hypothetical schema example, not the current app output.
       "timestamp_end": "00:23.500",
       "spoken_text": "After leaving the building, I immediately took a cab home.",
       "gaze_analysis": {
-        "pre_speech_vector": null,
-        "pre_speech_direction": null,
-        "nlp_code": null,
-        "nlp_classification": null,
-        "cognitive_type": null,
-        "associated_sample_ids": [],
-        "gaze_sample_count": 0,
-        "gaze_estimation_method": "not_configured",
-        "analysis_status": "gaze_tracking_disabled_by_user"
+        "primary_direction": "LATERAL_LEFT",
+        "primary_nlp_code": "Ac",
+        "primary_classification": "Auditory Constructed",
+        "primary_cognitive_type": "CONSTRUCTED",
+        "peak_deviation": 0.312,
+        "peak_sample_id": "g-00514",
+        "peak_vector": { "x": -0.306, "y": 0.041 },
+        "variance_x": 0.0021,
+        "variance_y": 0.0001,
+        "during_utterance_direction": "LATERAL_LEFT",
+        "during_utterance_nlp_code": "Ac",
+        "during_utterance_classification": "Auditory Constructed",
+        "during_utterance_cognitive_type": "CONSTRUCTED",
+        "pre_speech_direction": "CENTER",
+        "pre_speech_nlp_code": null,
+        "pre_speech_classification": "CENTER",
+        "pre_speech_cognitive_type": "CENTRAL",
+        "nlp_code": "Ac",
+        "nlp_classification": "Auditory Constructed",
+        "cognitive_type": "CONSTRUCTED",
+        "associated_sample_ids": ["g-00514", "g-00515"],
+        "gaze_sample_count": 2,
+        "gaze_estimation_method": "experimental_head_pose_landmarks",
+        "analysis_status": "peak_deviation_classified"
       },
       "presage_biometrics": {
         "pulse_bpm": null,

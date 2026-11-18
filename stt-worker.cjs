@@ -10,6 +10,7 @@
 //        {"type":"interim","text"} | {"type":"error","message"}
 // stdout carries protocol messages only; all diagnostics go to stderr.
 
+
 const readline = require("node:readline");
 const { pipeline, env } = require("@xenova/transformers");
 
