@@ -2681,6 +2681,19 @@ function buildTurnGroups() {
   });
 }
 
+function renderJsonView() {
+  if (!dataPaneJsonCode) {
+    if (dataPaneJson) dataPaneJson.innerHTML = "<pre class=\"data-pane-view\" id=\"data-pane-json\" role=\"tabpanel\"><code class=\"data-pane-code\"></code></pre>";
+  }
+  if (dataPaneJsonCode) {
+    if (sessionActive || utterances.length > 0 || biometricSamples.length > 0) {
+      dataPaneJsonCode.textContent = JSON.stringify(buildSessionData(), null, 2);
+    } else {
+      dataPaneJsonCode.textContent = "No session data";
+    }
+  }
+}
+
 function exportSession() {
   const content = JSON.stringify(buildSessionData(), null, 2);
   const file = new Blob([content], { type: "application/json" });
@@ -2920,7 +2933,7 @@ function switchDataPaneView(view) {
   if (view === "rich-text") {
     renderRichText();
   } else if (view === "json") {
-    exportSession();
+    renderJsonView();
   }
 }
 
