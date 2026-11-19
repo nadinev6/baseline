@@ -52,7 +52,7 @@ function createApplicationMenu() {
       label: "File",
       submenu: [
         {
-          label: "Information…",
+          label: "About…",
           accelerator: "CmdOrCtrl+I",
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {

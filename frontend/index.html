@@ -225,7 +225,7 @@
                     <p class="info-version">Free-flow practice · Local workspace · v0.1.0</p>
                 </div>
             </div>
-            <div class="info-tabs" role="tablist" aria-label="Information sections">
+            <div class="info-tabs" role="tablist" aria-label="About sections">
                 <button type="button" class="info-tab is-active" role="tab" id="info-tab-overview" aria-selected="true" aria-controls="info-panel-overview" tabindex="0">Overview</button>
                 <button type="button" class="info-tab" role="tab" id="info-tab-gaze" aria-selected="false" aria-controls="info-panel-gaze" tabindex="-1">Head direction matrix</button>
                 <button type="button" class="info-tab" role="tab" id="info-tab-biometrics" aria-selected="false" aria-controls="info-panel-biometrics" tabindex="-1">Biometrics</button>
@@ -327,8 +327,8 @@
             </section>
             <section role="tabpanel" id="info-panel-biometrics" class="info-tabpanel" aria-labelledby="info-tab-biometrics" tabindex="0" hidden>
                 <div class="info-section">
-                    <h3>Cardio measurements</h3>
-                    <p class="info-note">Only pulse and HRV are requested during this diagnostic phase. Their values are wellness signals, not diagnostic measurements.</p>
+                    <h3>Biometrics & Telemetry metrics</h3>
+                    <p class="info-note">All metrics are per-utterance observations from the SmartSpectra SDK. Values are wellness signals, not diagnostic measurements.</p>
                     <table class="info-table">
                         <thead>
                             <tr>
@@ -342,14 +342,182 @@
                             <tr>
                                 <td class="info-mono">pulse_bpm</td>
                                 <td>Pulse rate (BPM)</td>
-                                <td>Usually needs about 12 seconds of measurement</td>
-                                <td>Raw observation; no standalone stress or cognitive inference</td>
+                                <td>~12 s of stable readings</td>
+                                <td>Raw observation; baseline established after 30 s of stable samples</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">pulse_baseline_bpm</td>
+                                <td>Pulse baseline (BPM)</td>
+                                <td>Median of first 30 s stable samples (≥3 samples, ≥15 s span)</td>
+                                <td>Reference for computing pulse_spike_bpm</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">pulse_spike_bpm</td>
+                                <td>Pulse change vs baseline (BPM)</td>
+                                <td>After baseline established</td>
+                                <td>Positive = elevated vs baseline; used in cardio response candidate</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">pulse_confidence</td>
+                                <td>Pulse confidence (0–100)</td>
+                                <td>With each stable pulse reading</td>
+                                <td>SDK quality indicator</td>
                             </tr>
                             <tr>
                                 <td class="info-mono">hrv_ms</td>
                                 <td>HRV RMSSD (ms)</td>
-                                <td>Usually needs about 60 seconds of measurement</td>
-                                <td>Raw observation; no standalone stress or cognitive inference</td>
+                                <td>~60 s of stable readings</td>
+                                <td>Raw observation; baseline established after 30 s of stable samples</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">hrv_baseline_ms</td>
+                                <td>HRV baseline (ms)</td>
+                                <td>Median of first 30 s stable samples (≥3 samples, ≥15 s span)</td>
+                                <td>Reference for computing hrv_delta_ms</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">hrv_metric</td>
+                                <td>HRV metric type</td>
+                                <td>Always "RMSSD"</td>
+                                <td>Standardized HRV measure</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">hrv_confidence</td>
+                                <td>HRV confidence (0–100)</td>
+                                <td>With each stable HRV reading</td>
+                                <td>SDK quality indicator</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">hrv_delta_ms</td>
+                                <td>HRV change vs baseline (ms)</td>
+                                <td>After baseline established</td>
+                                <td>Negative = reduced HRV vs baseline; used in cardio response candidate</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">blink_suppression_s</td>
+                                <td>Blink suppression duration (s)</td>
+                                <td>Per utterance with blink samples</td>
+                                <td>Time without blinks during utterance</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">blink_rate_pm</td>
+                                <td>Blink rate (per minute)</td>
+                                <td>Per utterance window</td>
+                                <td>Descriptive only; not a cognitive-state measure</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">blink_detected</td>
+                                <td>Blink state (bool)</td>
+                                <td>Per biometric sample</td>
+                                <td>Raw blink on/off from SDK</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">blink_stable</td>
+                                <td>Stable blink transition (bool)</td>
+                                <td>Per biometric sample</td>
+                                <td>True only for confirmed blink-on transitions</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">talking_detected</td>
+                                <td>Talking state (bool)</td>
+                                <td>Per biometric sample (~30 fps)</td>
+                                <td>SDK talking detection; packet-quantized, not audio onset</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">talking_stable</td>
+                                <td>Stable talking state (bool)</td>
+                                <td>Per biometric sample</td>
+                                <td>True for confirmed talking state</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">pulse_baseline_status</td>
+                                <td>Pulse baseline status</td>
+                                <td>awaiting_measurements / baseline_ready / computing</td>
+                                <td>Progress of baseline establishment</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">hrv_baseline_status</td>
+                                <td>HRV baseline status</td>
+                                <td>awaiting_measurements / baseline_ready / computing</td>
+                                <td>Progress of baseline establishment</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">analysis_status</td>
+                                <td>Biometrics analysis status</td>
+                                <td>Always present</td>
+                                <td>cardio_baseline_not_ready / baseline_relative_metrics_computed / no_biometric_samples</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="info-section">
+                    <h3>Telemetry flags (per utterance)</h3>
+                    <table class="info-table">
+                        <thead>
+                            <tr>
+                                <th>Flag</th>
+                                <th>Trigger</th>
+                                <th>Interpretation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="info-mono">elevated_cognitive_load</td>
+                                <td>Reserved</td>
+                                <td>Not inferred; remains <code>null</code></td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">autonomic_shift_detected</td>
+                                <td>Alias for cardio_response_candidate</td>
+                                <td>Provisional; not a diagnosis</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">cardio_response_candidate</td>
+                                <td>pulse_spike_bpm ≥ 4 AND hrv_delta_ms ≤ -15</td>
+                                <td>Provisional heuristic; not a validated stress measure</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">biometric_congruence</td>
+                                <td>Reserved</td>
+                                <td>Not inferred; remains <code>null</code></td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">analysis_status</td>
+                                <td>Flags analysis status</td>
+                                <td>not_computed_cardio_baseline_or_post_baseline_readings_missing / cardio_baseline_ready</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="info-section">
+                    <h3>Delivery metrics (per turn)</h3>
+                    <table class="info-table">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="info-mono">eye_contact_stability</td>
+                                <td>Fraction of utterance time gaze was near center (CENTER/UP_LEFT/UP_RIGHT)</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">pacing</td>
+                                <td>Optimal / Rushed based on word count vs utterance duration</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">avg_pulse_bpm</td>
+                                <td>Average pulse across turn</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">avg_hrv_ms</td>
+                                <td>Average HRV across turn</td>
+                            </tr>
+                            <tr>
+                                <td class="info-mono">blink_event_count</td>
+                                <td>Stable blink events in turn</td>
                             </tr>
                         </tbody>
                     </table>
@@ -376,7 +544,14 @@
     "app_name": "Baseline CogniSync",
     "timestamp_iso": "2026-11-09T12:43:00Z",
     "handedness_setting": "RIGHT",
-    "gaze_inversion_active": false
+    "gaze_inversion_active": false,
+    "gaze_estimator": {
+      "name": "SmartSpectra SDK FACE_LANDMARKS",
+      "runtime": "smartspectra_sdk",
+      "tracking_status": "experimental_head_pose_landmarks_estimates_recorded_nlp_mapping_disabled",
+      "calibration_status": "sdk_stable_flag_provided",
+      "cognitive_classification": "disabled_not_validated"
+    }
   },
   "utterance_telemetry_stream": [
     {
@@ -385,11 +560,13 @@
       "timestamp_end": "00:23.500",
       "spoken_text": "After leaving the building, I immediately took a cab home.",
       "gaze_analysis": {
-        "pre_speech_vector": null,
-        "nlp_code": null,
-        "nlp_classification": null,
-        "cognitive_type": null,
-        "analysis_status": "gaze_tracking_disabled_by_user"
+        "primary_direction": "CENTER",
+        "primary_vector": { "x": 0.0, "y": 0.1 },
+        "primary_nlp_code": null,
+        "primary_classification": "CENTER",
+        "peak_deviation": 0.1,
+        "peak_sample_id": "g-00001",
+        "analysis_status": "peak_deviation_classified"
       },
       "presage_biometrics": {
         "pulse_bpm": null,
@@ -399,6 +576,16 @@
         "hrv_baseline_ms": null,
         "hrv_delta_ms": null,
         "analysis_status": "cardio_baseline_not_ready"
+      },
+      "blink_analysis": {
+        "event_ids": [],
+        "blink_event_count": 0,
+        "blink_rate_per_minute": null,
+        "analysis_status": "no_blink_samples_in_approximate_transcription_window"
+      },
+      "speech_detection": {
+        "linked_event_ids": [],
+        "analysis_status": "unavailable_no_face_talking_packets"
       },
       "telemetry_flags": {
         "elevated_cognitive_load": null,

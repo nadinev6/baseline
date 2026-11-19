@@ -2404,7 +2404,7 @@ function buildSessionData() {
   return {
     session_metadata: {
       session_id: sessionStartedAt,
-      app_name: "Baseline",
+      app_name: "Baseline CogniSync",
       timestamp_iso: sessionStartedAt,
       session_ended_at: sessionStoppedAt === null ? null : new Date(Date.parse(sessionStartedAt) + elapsedMs()).toISOString(),
       session_elapsed_ms: elapsedMs(),
