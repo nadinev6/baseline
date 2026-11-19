@@ -1508,6 +1508,16 @@ async function startCameraPreview(deviceId) {
     return false;
   }
 
+  // If the camera preview is already running for the same device, reuse the
+  // existing stream instead of requesting a new getUserMedia grant.
+  if (cameraStream && cameraVideo.srcObject === cameraStream) {
+    const currentTrack = cameraStream.getVideoTracks()[0];
+    const currentDeviceId = currentTrack?.getSettings().deviceId || "";
+    if (!deviceId || currentDeviceId === deviceId) {
+      return true;
+    }
+  }
+
   const constraints = {
     audio: false,
     video: deviceId
@@ -2072,15 +2082,10 @@ async function stopFreeSession(showMessage) {
   } catch {
     cleanupSucceeded = false;
   } finally {
-    // Always tear down timers, camera, and UI — a failure in the async
-    // cleanup path must not leave the clock ticking or the camera running.
-    stopCameraPreview();
+    // Always clear timers and session state — a failure in the async cleanup path must not leave the clock ticking or the camera running.
     if (sessionClockTimer !== null) {
       window.clearInterval(sessionClockTimer);
-      sessionClockTimer = null;
-    }
-    if (smartSpectraWatchdogTimer !== null) {
-      window.clearInterval(smartSpectraWatchdogTimer);
+
       smartSpectraWatchdogTimer = null;
     }
     smartSpectraRecoveryInFlight = false;
@@ -2753,21 +2758,17 @@ cameraForm.addEventListener("submit", (event) => {
   const changed = value !== getPreferredCameraDeviceId();
   setPreferredCameraDeviceId(value);
   cameraDialogElement.close();
-  if (smartSpectraClient && sessionActive && changed) {
+  if (changed) {
     stopCameraPreview();
     startCameraPreview(value).then((connected) => {
-      if (connected) {
+      if (connected && sessionActive && smartSpectraClient) {
         startSmartSpectraTelemetry(cameraStream);
       }
     });
     showToast(`Camera switched to ${deviceLabel}. SmartSpectra restarted on the new input.`);
-  } else if (changed) {
+  } else {
     showToast(`Camera saved: ${deviceLabel}. It applies to the next session.`);
   }
-});
-
-cameraDialogElement.addEventListener("close", () => {
-  if (!sessionActive) stopCameraPreview();
 });
 
 infoTabButtons.forEach((tab, index) => {
@@ -2934,14 +2935,17 @@ function switchDataPaneView(view) {
   }
 }
 
-// Initialize the default view (Signals) on load.
-switchDataPaneView("rich-text");
+// Initialize the default view (Camera preview) on load.
+switchDataPaneView("preview");
 
 dataPaneViewBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     switchDataPaneView(btn.dataset.view || "rich-text");
   });
 });
+
+// Start camera preview on app load so it's ready before session begins.
+startCameraPreview(getPreferredCameraDeviceId()).catch(() => {});
 
 const dataPaneSearch = document.getElementById("data-pane-search");
 const dataPaneSearchClear = document.getElementById("data-pane-search-clear");
