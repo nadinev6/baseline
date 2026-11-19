@@ -718,11 +718,10 @@ body {
 }
 
 .data-pane-view {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .data-pane-view.is-active {
