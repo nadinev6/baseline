@@ -2685,12 +2685,9 @@ function renderJsonView() {
   if (!dataPaneJsonCode) {
     if (dataPaneJson) dataPaneJson.innerHTML = "<pre class=\"data-pane-view\" id=\"data-pane-json\" role=\"tabpanel\"><code class=\"data-pane-code\"></code></pre>";
   }
-  if (dataPaneJsonCode) {
-    if (sessionActive || utterances.length > 0 || biometricSamples.length > 0) {
-      dataPaneJsonCode.textContent = JSON.stringify(buildSessionData(), null, 2);
-    } else {
-      dataPaneJsonCode.textContent = "No session data";
-    }
+  const jsonCodeEl = dataPaneJsonCode || dataPaneJson?.querySelector(".data-pane-code");
+  if (jsonCodeEl) {
+    jsonCodeEl.textContent = JSON.stringify(buildSessionData(), null, 2);
   }
 }
 
