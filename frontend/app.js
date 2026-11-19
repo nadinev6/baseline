@@ -2387,9 +2387,13 @@ function buildSessionData() {
   const adapterHeadDirectionSamples = headDirectionSamples.filter((sample) => sample.source !== HEAD_DIRECTION_SOURCE || sample.calibrated !== true);
   const landmarkSamplesReceived = headDirectionSamples.length > 0;
   const headDirectionEstimatorStatus = landmarkSamplesReceived
-    ? "experimental_head_pose_landmarks_estimates_recorded_nlp_mapping_disabled"
+    ? smartSpectraPacketsStalled()
+      ? "experimental_head_pose_landmarks_recorded_then_pipeline_stalled"
+      : "experimental_head_pose_landmarks_estimates_recorded_nlp_mapping_disabled"
     : activeSessionFeatures.headDirection
-      ? "awaiting_smart_spectra_landmarks"
+      ? smartSpectraPacketsStalled()
+        ? "awaiting_smart_spectra_landmarks_pipeline_stalled"
+        : "awaiting_smart_spectra_landmarks"
       : "disabled_by_user";
   const headDirectionCalibrationStatus = landmarkSamplesReceived
     ? "sdk_stable_flag_provided"
@@ -2916,11 +2920,7 @@ function switchDataPaneView(view) {
   if (view === "rich-text") {
     renderRichText();
   } else if (view === "json") {
-    if (sessionActive) {
-      exportSession();
-    } else if (dataPaneJsonCode) {
-      dataPaneJsonCode.textContent = "No session data";
-    }
+    exportSession();
   }
 }
 
@@ -2978,11 +2978,7 @@ const dataPaneExportBtn = document.querySelector(".data-pane-export");
 if (dataPaneExportBtn && !dataPaneExportBtn.hasAttribute("data-bound")) {
   dataPaneExportBtn.setAttribute("data-bound", "true");
   dataPaneExportBtn.addEventListener("click", () => {
-    if (sessionActive) {
-      exportSession();
-    } else {
-      showToast("Start a session to export JSON data.");
-    }
+    exportSession();
   });
 }
 
@@ -2990,7 +2986,10 @@ function renderRichText() {
   if (!dataPaneRichText) return;
   dataPaneRichText.innerHTML = "";
   const entries = [];
+  
+  // Blink events - show all (usually small count)
   if (blinkEvents.length > 0) {
+    // Show latest blink event
     const latest = blinkEvents[blinkEvents.length - 1];
     entries.push({
       time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -3001,31 +3000,51 @@ function renderRichText() {
       badge: `<span class="rich-text-badge rich-text-badge--blink">${latest.counted_as_blink ? "BLINK (STABLE)" : "BLINK (UNSTABLE)"}</span>`,
     });
   }
+  
+  // Biometric samples - show notable changes, dedup similar consecutive values
   if (biometricSamples.length > 0) {
-    const latestPulse = [...biometricSamples].reverse().find((s) => s.pulse_stable === true && s.pulse_bpm);
-    if (latestPulse) {
-      entries.push({
-        time: new Date(latestPulse.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        type: "pulse",
-        stable: true,
-        transcript: `Pulse rate ${latestPulse.pulse_bpm.toFixed(1)} BPM`,
-        details: `event ${latestPulse.event_id ?? "N/A"}: ${latestPulse.pulse_bpm.toFixed(1)} BPM`,
-        badge: `<span class="rich-text-badge rich-text-badge--pulse">${latestPulse.pulse_stable ? "PULSE (STABLE)" : "PULSE (UNSTABLE)"}</span>`,
-      });
+    // Find pulse entries with actual values (dedup consecutive identical BPM)
+    let lastPulseBpm = null;
+    for (const sample of biometricSamples) {
+      if (sample.pulse_stable && sample.pulse_bpm && sample.pulse_bpm > 0) {
+        const currentBpm = sample.pulse_bpm.toFixed(1);
+        if (currentBpm !== lastPulseBpm) {
+          lastPulseBpm = currentBpm;
+          entries.push({
+            time: new Date(sample.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            type: "pulse",
+            stable: sample.pulse_stable,
+            transcript: `Pulse rate ${currentBpm} BPM`,
+            details: `event ${sample.event_id ?? "N/A"}: ${currentBpm} BPM, stable=${sample.pulse_stable}`,
+            badge: `<span class="rich-text-badge rich-text-badge--pulse">${sample.pulse_stable ? "PULSE (STABLE)" : "PULSE (UNSTABLE)"}</span>`,
+          });
+        }
+      }
     }
-    const latestHrv = [...biometricSamples].reverse().find((s) => s.hrv_stable === true && s.hrv_ms);
-    if (latestHrv) {
-      entries.push({
-        time: new Date(latestHrv.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        type: "hrv",
-        stable: true,
-        transcript: `HRV ${latestHrv.hrv_ms.toFixed(1)} MS`,
-        details: `event ${latestHrv.event_id ?? "N/A"}: ${latestHrv.hrv_ms.toFixed(1)} MS`,
-        badge: `<span class="rich-text-badge rich-text-badge--hrv">${latestHrv.hrv_stable ? "HRV (STABLE)" : "HRV (UNSTABLE)"}</span>`,
-      });
+    
+    // Find HRV entries with actual values (dedup consecutive identical HRV)
+    let lastHrv = null;
+    for (const sample of biometricSamples) {
+      if (sample.hrv_stable && sample.hrv_ms && sample.hrv_ms > 0) {
+        const currentHrv = sample.hrv_ms.toFixed(1);
+        if (currentHrv !== lastHrv) {
+          lastHrv = currentHrv;
+          entries.push({
+            time: new Date(sample.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            type: "hrv",
+            stable: sample.hrv_stable,
+            transcript: `HRV ${currentHrv} MS`,
+            details: `event ${sample.event_id ?? "N/A"}: ${currentHrv} MS, stable=${sample.hrv_stable}`,
+            badge: `<span class="rich-text-badge rich-text-badge--hrv">${sample.hrv_stable ? "HRV (STABLE)" : "HRV (UNSTABLE)"}</span>`,
+          });
+        }
+      }
     }
   }
+  
+  // Hand direction changes - show all changes
   if (handednessHistory.length > 0) {
+    // Show the final handedness
     const latest = handednessHistory[handednessHistory.length - 1];
     entries.push({
       time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -3036,29 +3055,34 @@ function renderRichText() {
       badge: `<span class="rich-text-badge rich-text-badge--direction">${latest.preference}</span>`,
     });
   }
+  
+  // Face speech events - show all transitions
   if (faceSpeechEvents.length > 0) {
-    const latest = faceSpeechEvents[faceSpeechEvents.length - 1];
-    const talkingText = latest.detected ? (latest.stable ? "TALKING STABLE" : "TALKING") : "LISTENING";
-    const talkingClass = latest.detected ? (latest.stable ? "rich-text-badge--talking-stable" : "rich-text-badge--talking-active") : "rich-text-badge--talking-off";
-    entries.push({
-      time: new Date(latest.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      type: "talking",
-      stable: latest.stable,
-      transcript: talkingText,
-      details: `${latest.event_id ?? "N/A"}: detected=${latest.detected}, stable=${latest.stable}`,
-      badge: `<span class="rich-text-badge ${talkingClass}">${talkingText}</span>`,
-    });
+    // Show all face speech events
+    for (const event of faceSpeechEvents) {
+      const talkingText = event.detected ? (event.stable ? "TALKING STABLE" : "TALKING") : "LISTENING";
+      const talkingClass = event.detected ? (event.stable ? "rich-text-badge--talking-stable" : "rich-text-badge--talking-active") : "rich-text-badge--talking-off";
+      entries.push({
+        time: new Date(event.timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        type: "talking",
+        stable: event.stable,
+        transcript: talkingText,
+        details: `${event.event_id ?? "N/A"}: detected=${event.detected}, stable=${event.stable}`,
+        badge: `<span class="rich-text-badge ${talkingClass}">${talkingText}</span>`,
+      });
+    }
   }
+  
   if (entries.length === 0) {
     dataPaneRichText.innerHTML = `
       <div class="rich-text-empty">
         <div class="rich-text-empty-icon" aria-hidden="true">◎</div>
         <p>No session data</p>
-        <span>Start a free session to stream live JSON and rich-text analysis.</span>
       </div>
     `;
     return;
   }
+  
   entries.forEach((entry) => {
     const el = document.createElement("div");
     el.className = "rich-text-entry";
