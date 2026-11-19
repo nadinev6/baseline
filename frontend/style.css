@@ -725,6 +725,11 @@ body {
     overflow-y: auto;
 }
 
+/* Camera stage must not have overflow so the SDK can detect the video element */
+.data-pane-view.camera-stage {
+    overflow: hidden;
+}
+
 .data-pane-view.is-active {
     display: flex;
 }
