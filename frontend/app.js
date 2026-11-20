@@ -24,7 +24,7 @@ const { headDirectionFromLandmarks, mapDirection, HEAD_DIRECTION_SOURCE } = requ
 
 const $ = (selector) => document.querySelector(selector);
 const SENSOR_FEATURE_PREFERENCE_KEY = "baseline.sensorFeatures";
-const DEFAULT_SENSOR_FEATURES = Object.freeze({ pulse: true, hrv: true, headDirection: false });
+const DEFAULT_SENSOR_FEATURES = Object.freeze({ pulse: true, hrv: true, talking: true, headDirection: false });
 
 function readSensorFeaturePreferences() {
   try {
@@ -32,6 +32,7 @@ function readSensorFeaturePreferences() {
     return {
       pulse: typeof saved.pulse === "boolean" ? saved.pulse : DEFAULT_SENSOR_FEATURES.pulse,
       hrv: typeof saved.hrv === "boolean" ? saved.hrv : DEFAULT_SENSOR_FEATURES.hrv,
+      talking: typeof saved.talking === "boolean" ? saved.talking : DEFAULT_SENSOR_FEATURES.talking,
       headDirection: typeof saved.headDirection === "boolean" ? saved.headDirection : DEFAULT_SENSOR_FEATURES.headDirection,
     };
   } catch {
@@ -88,6 +89,11 @@ const cameraDialogElement = $("#camera-dialog");
 const cameraForm = $("#camera-form");
 const cameraOptions = $("#camera-options");
 const cameraNote = $("#camera-note");
+const logPaneContainer = "log-pane-container";
+const logPaneContent = "log-pane-content";
+const logPaneToggle = "log-pane-toggle";
+let logEntries = [];
+let logPaneExpanded = false;
 const informationDialog = $("#information-dialog");
 const infoTabButtons = [...document.querySelectorAll("#information-dialog .info-tab")];
 const infoPanels = new Map(
@@ -288,22 +294,51 @@ function updateSessionClock() {
 }
 
 function showToast(text, isError = false) {
-  const toast = document.createElement("div");
-  toast.className = isError ? "toast is-error" : "toast";
-  toast.setAttribute("role", isError ? "alert" : "status");
-  toast.textContent = text;
-  let dismissalTimer = null;
-  const dismiss = () => {
-    if (dismissalTimer === null) return;
-    window.clearTimeout(dismissalTimer);
-    dismissalTimer = null;
-    toast.classList.add("is-leaving");
-    window.setTimeout(() => toast.remove(), 200);
-  };
-  toast.addEventListener("click", dismiss);
-  dismissalTimer = window.setTimeout(dismiss, isError ? 6000 : 3500);
-  toastContainer.append(toast);
+  logPaneExpanded = true;
+  addLogEntry(text, isError);
+  renderLogPane();
+  const toggleEl = document.getElementById(logPaneToggle);
+  if (toggleEl) toggleEl.setAttribute("aria-expanded", "true");
 }
+
+function addLogEntry(text, isError = false) {
+  const entry = { timestamp_ms: Date.now(), text, isError };
+  logEntries.push(entry);
+  renderLogPane();
+}
+
+function renderLogPane() {
+  const container = document.getElementById(logPaneContainer);
+  const content = document.getElementById(logPaneContent);
+  if (!container || !content) return;
+  content.hidden = false;
+  content.innerHTML = "";
+  // Show only the last 3 log entries
+  const recent = logEntries.slice(-3);
+  for (const entry of recent) {
+    const div = document.createElement("div");
+    div.className = `log-entry ${entry.isError ? "error" : "info"}`;
+    div.setAttribute("role", "listitem");
+    div.setAttribute("aria-level", entry.isError ? "error" : "info");
+    div.textContent = `${new Date(entry.timestamp_ms).toLocaleTimeString()}: ${entry.text}`;
+    content.appendChild(div);
+  }
+  if (logEntries.length === 0 || recent.length === 0) {
+    const div = document.createElement("div");
+    div.className = "log-empty";
+    div.textContent = "No entries yet.";
+    content.appendChild(div);
+  }
+}
+
+function toggleLogPane() {
+  logPaneExpanded = !logPaneExpanded;
+  const toggleEl = document.getElementById(logPaneToggle);
+  if (toggleEl) toggleEl.setAttribute("aria-expanded", String(logPaneExpanded));
+  renderLogPane();
+}
+
+document.getElementById(logPaneToggle)?.addEventListener("click", toggleLogPane);
 
 function setStreamStatus(text, active = false) {
   streamStatus.textContent = text;
@@ -1495,6 +1530,88 @@ function setPreferredCameraDeviceId(id) {
   }
 }
 
+async function findObsVirtualCameraDeviceId() {
+  if (!navigator.mediaDevices?.enumerateDevices) return "";
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const obs = devices.find((device) =>
+      device.kind === "videoinput" && /obs virtual camera/i.test(device.label || ""),
+    );
+    return obs ? obs.deviceId : "";
+  } catch {
+    return "";
+  }
+}
+
+async function openFirstAvailableCamera() {
+  if (!navigator.mediaDevices?.enumerateDevices) return null;
+  const tryOpenAll = async () => {
+    let devices;
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      return null;
+    }
+    const candidates = devices.filter(
+      (device) =>
+        device.kind === "videoinput" &&
+        device.deviceId !== "default" &&
+        device.deviceId !== "communications",
+    );
+    if (candidates.length === 0) return null;
+    // Prefer OBS Virtual Camera when present so the app can use a framed OBS
+    // feed even when the physical camera is missing, broken, or busy.
+    candidates.sort((a, b) => {
+      const aObs = /obs virtual camera/i.test(a.label || "") ? 0 : 1;
+      const bObs = /obs virtual camera/i.test(b.label || "") ? 0 : 1;
+      return aObs - bObs;
+    });
+    for (const device of candidates) {
+      // Try the app's preferred capture constraints first...
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { deviceId: { exact: device.deviceId }, ...CAMERA_CAPTURE_CONSTRAINTS },
+        });
+      } catch {
+        // One camera failed; retry with relaxed constraints (virtual cameras
+        // may not honour exact resolution/fps) before moving on.
+      }
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { deviceId: { exact: device.deviceId } },
+        });
+      } catch {
+        // Try the next camera.
+      }
+    }
+    return null;
+  };
+  let stream = await tryOpenAll();
+  if (!stream) {
+    // OBS Virtual Camera can take a moment to appear after being started;
+    // retry once after a short delay.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    stream = await tryOpenAll();
+  }
+  return stream;
+}
+
+async function buildDefaultCameraConstraints() {
+  const obsDeviceId = await findObsVirtualCameraDeviceId();
+  const deviceId = obsDeviceId || "";
+  if (!deviceId) {
+    // No OBS Virtual Camera (or it is not running yet); use the system
+    // default front-facing camera.
+    return { audio: false, video: { facingMode: "user", ...CAMERA_CAPTURE_CONSTRAINTS } };
+  }
+  return {
+    audio: false,
+    video: { deviceId: { exact: deviceId }, ...CAMERA_CAPTURE_CONSTRAINTS },
+  };
+}
+
 async function startCameraPreview(deviceId) {
   cameraError.textContent = "";
   if (videoFileSourceUrl && videoFile) {
@@ -1518,14 +1635,22 @@ async function startCameraPreview(deviceId) {
     }
   }
 
+  // Release the previous camera before requesting a different device; an
+  // open track on another camera can make the new request fail with
+  // NotReadableError ("already in use"), especially with virtual cameras.
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+
   const constraints = {
     audio: false,
     video: deviceId
       ? { deviceId: { exact: deviceId }, ...CAMERA_CAPTURE_CONSTRAINTS }
-      : { facingMode: "user", ...CAMERA_CAPTURE_CONSTRAINTS },
+      : await buildDefaultCameraConstraints(),
   };
 
-  let stream = null;
+let stream = null;
   try {
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     cameraStream = stream;
@@ -1538,6 +1663,30 @@ async function startCameraPreview(deviceId) {
     return true;
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop());
+    // Only fall back to another camera when no explicit deviceId was given;
+    // otherwise leave the user's choice alone (showing an error if it fails).
+    const shouldFallback = !deviceId && error?.name !== "NotAllowedError";
+    if (shouldFallback) {
+      stream = await openFirstAvailableCamera();
+    }
+    if (stream) {
+      cameraStream = stream;
+      const track = cameraStream.getVideoTracks()[0];
+      const discoveredId = track?.getSettings().deviceId || "";
+      // Only auto-persist if the fallback camera is OBS Virtual Camera;
+      // do not lock in Camo Cam or other fallback cameras.
+      if (discoveredId && discoveredId !== getPreferredCameraDeviceId()) {
+        const isObs = /obs virtual camera/i.test(track.label || "");
+        if (isObs) setPreferredCameraDeviceId(discoveredId);
+      }
+      cameraVideo.srcObject = cameraStream;
+      cameraPreviewWasConnected = true;
+      cameraStage.classList.add("is-live");
+      cameraPlaceholder.hidden = true;
+      setCameraStatus("PREVIEW ON");
+      setHeadDirectionPreviewStatus();
+      return true;
+    }
     cameraStream = null;
     markHeadDirectionTrackerNoCamera();
     setCameraStatus("OFF");
@@ -1609,6 +1758,14 @@ async function populateCameraOptions(savedId) {
     .filter((device) => device.kind === "videoinput" &&
       device.deviceId !== "default" && device.deviceId !== "communications");
 
+  // Put OBS Virtual Camera first so it is easy to pick, even when it is not
+  // the system default.
+  devices.sort((a, b) => {
+    const aObs = /obs virtual camera/i.test(a.label || "") ? 0 : 1;
+    const bObs = /obs virtual camera/i.test(b.label || "") ? 0 : 1;
+    return aObs - bObs;
+  });
+
   cameraOptions.textContent = "";
   const options = [{ value: "", label: `System default${defaultLabel ? ` — ${defaultLabel}` : ""}` }];
 
@@ -1628,12 +1785,12 @@ async function populateCameraOptions(savedId) {
     const text = document.createElement("span");
     text.className = "mic-option-label";
     text.textContent = option.label;
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       if (!input.checked) return;
-      startCameraPreview(option.value).catch(() => {
-        cameraNote.textContent =
-          "That camera could not be opened. It may be busy, missing, or blocked by Windows privacy settings.";
-      });
+      const connected = await startCameraPreview(option.value);
+      cameraNote.textContent = connected
+        ? ""
+        : "That camera could not be opened. It may be busy, missing, or not running yet (start OBS Virtual Camera, then reopen this dialog).";
     });
     row.append(input, text);
     cameraOptions.append(row);
@@ -1651,8 +1808,12 @@ async function openCameraSettings() {
     cameraNote.textContent =
       "Could not enumerate camera devices. Check Windows privacy settings for camera access.";
   }
+  // Default preview: prefer OBS Virtual Camera if it is available, otherwise
+  // fall back to the saved/system default. Do NOT silently switch to a random
+  // camera when the requested one fails.
+  const previewDeviceId = (await findObsVirtualCameraDeviceId()) || savedId;
   try {
-    await startCameraPreview(savedId);
+    await startCameraPreview(previewDeviceId);
   } catch {
     cameraNote.textContent = populated
       ? "The selected camera could not be opened for the preview. It may be busy, missing, or blocked."
@@ -2419,6 +2580,7 @@ function buildSessionData() {
         blink: true,
         pulse: activeSessionFeatures.pulse,
         hrv: activeSessionFeatures.hrv,
+        talking: activeSessionFeatures.talking,
         gaze: activeSessionFeatures.headDirection,
       },
       gaze_inversion_active: false,
@@ -2761,11 +2923,15 @@ cameraForm.addEventListener("submit", (event) => {
   if (changed) {
     stopCameraPreview();
     startCameraPreview(value).then((connected) => {
-      if (connected && sessionActive && smartSpectraClient) {
-        startSmartSpectraTelemetry(cameraStream);
+      if (connected) {
+        if (sessionActive && smartSpectraClient) {
+          startSmartSpectraTelemetry(cameraStream);
+        }
+        showToast(`Camera switched to ${deviceLabel}. SmartSpectra restarted on the new input.`);
+      } else {
+        showToast(`Could not open ${deviceLabel}. Check that the camera is available and try again.`, true);
       }
     });
-    showToast(`Camera switched to ${deviceLabel}. SmartSpectra restarted on the new input.`);
   } else {
     showToast(`Camera saved: ${deviceLabel}. It applies to the next session.`);
   }
@@ -3138,9 +3304,22 @@ window.practiceSessionAdapter = Object.freeze({
   getSessionData: buildSessionData,
 });
 
-window.addEventListener("beforeunload", () => {
-  stopRecognition();
-  stopLocalStt();
-  stopCameraPreview();
-  if (sessionClockTimer !== null) window.clearInterval(sessionClockTimer);
+let cameraAutoRetryInFlight = false;
+
+window.addEventListener("devicechange", async () => {
+  // If we already have a camera stream, ignore device changes.
+  if (cameraStream || cameraAutoRetryInFlight) return;
+  // If session is active and telemetry is already running, ignore.
+  if (sessionActive) return;
+  // Otherwise try to open any available camera (e.g. OBS Virtual Camera now running),
+  // preferring OBS Virtual Camera, then the user's saved choice.
+  cameraAutoRetryInFlight = true;
+  try {
+    const obsId = await findObsVirtualCameraDeviceId();
+    await startCameraPreview(obsId || getPreferredCameraDeviceId() || undefined);
+  } catch {
+    // Ignore errors; the user can still pick from the Camera dialog.
+  } finally {
+    cameraAutoRetryInFlight = false;
+  }
 });

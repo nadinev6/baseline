@@ -889,12 +889,13 @@ body {
 }
 
 .app-footer {
-    height: 24px;
     background: var(--card);
     border-top: 1px solid var(--border);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    min-height: 24px;
 }
 
 .handle-bar {
@@ -931,6 +932,76 @@ body {
     text-align: center;
     pointer-events: auto;
     animation: toast-in 0.2s ease-out;
+}
+
+.log-pane-container {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 16px;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    box-shadow: none;
+}
+
+.log-pane-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted-foreground);
+    text-align: left;
+    padding: 2px 0;
+}
+
+.log-pane-toggle:hover {
+    color: var(--foreground);
+}
+
+.log-pane-content {
+    overflow-y: auto;
+    max-height: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-entry {
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    background: var(--popover);
+    border: 1px solid var(--border);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted-foreground);
+}
+
+.log-entry.error {
+    color: var(--red);
+}
+
+.log-empty {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.log-empty {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    margin: 0;
+    padding: 4px 0;
+}
+
+.log-empty {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    margin: 0;
+    padding: 4px 0;
 }
 
 @keyframes toast-in {

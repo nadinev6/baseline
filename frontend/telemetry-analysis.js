@@ -98,6 +98,7 @@ function computeCardioResponse(pulseDeltaBpm, hrvDeltaMs) {
 
 function buildRequestedMetrics(features, metricType) {
   const requested = [metricType.BLINKING];
+  if (features.talking) requested.push(metricType.TALKING);
   if (features.headDirection) requested.push(metricType.FACE_LANDMARKS);
   if (features.pulse) requested.push(metricType.PULSE_RATE);
   if (features.hrv) requested.push(metricType.HRV);

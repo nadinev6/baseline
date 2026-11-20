@@ -148,8 +148,9 @@
             </main>
         </div>
 
-        <footer class="app-footer">
-            <span class="handle-bar" aria-hidden="true"></span>
+        <footer id="log-pane-container" class="app-footer log-pane-container" role="region" aria-labelledby="log-pane-title" aria-expanded="false">
+            <button id="log-pane-toggle" class="log-pane-toggle" aria-label="Toggle log pane">📄 Log</button>
+            <div id="log-pane-content" class="log-pane-content" role="listbox" aria-live="polite"></div>
         </footer>
     </div>
 

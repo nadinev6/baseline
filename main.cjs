@@ -70,6 +70,15 @@ function createApplicationMenu() {
           },
         },
         {
+          label: "Video File…",
+          accelerator: "CmdOrCtrl+Shift+V",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("practice:show-video-settings");
+            }
+          },
+        },
+        {
           label: "Camera…",
           accelerator: "CmdOrCtrl+Shift+C",
           click: () => {
@@ -117,6 +126,16 @@ function createApplicationMenu() {
           }),
         },
         {
+          id: "feature-talking",
+          label: "Talking detection",
+          type: "checkbox",
+          checked: true,
+          click: (item) => sendToRenderer("practice:sensor-feature-toggle", {
+            feature: "talking",
+            enabled: item.checked,
+          }),
+        },
+        {
           id: "feature-head-direction",
           label: "Head tracking",
           type: "checkbox",
@@ -134,7 +153,7 @@ function createApplicationMenu() {
   ];
   const menu = Menu.buildFromTemplate(template);
   sensorFeatureMenuItems = new Map(
-    ["pulse", "hrv", "headDirection"].map((feature) => [
+    ["pulse", "hrv", "talking", "headDirection"].map((feature) => [
       feature,
       menu.getMenuItemById(`feature-${feature}`),
     ]),
@@ -175,6 +194,7 @@ function createWindow() {
     ipcMain.removeHandler("practice:stt-stop");
     ipcMain.removeAllListeners("practice:app-log");
     ipcMain.removeAllListeners("practice:sensor-feature-state");
+    ipcMain.removeAllListeners("practice:show-video-settings");
     mainWindow = null;
   });
 
