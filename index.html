@@ -1,0 +1,2177 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Baseline CogniSync Interpreter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            serif: ['Playfair Display', 'Georgia', 'serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            background: 'var(--background)',
+            foreground: 'var(--foreground)',
+            card: 'var(--card)',
+            'card-foreground': 'var(--card-foreground)',
+            muted: 'var(--muted)',
+            'muted-foreground': 'var(--muted-foreground)',
+            accent: 'var(--accent)',
+            'accent-foreground': 'var(--accent-foreground)',
+            border: 'var(--border)',
+            ring: 'var(--ring)',
+            zenInk: '#161513',
+            zenPaper: '#F6F3EC',
+            zenOatmeal: '#EFECE3',
+            zenHairline: '#E2DDD2',
+            zenSage: '#4A6B5D',
+            zenAmber: '#B45309',
+            zenPlum: '#6D4C7D',
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    :root {
+      --background: #F6F3EC;
+      --foreground: #161513;
+      --card: #FBF9F5;
+      --card-foreground: #161513;
+      --muted: #EFECE3;
+      --muted-foreground: #5C5852;
+      --accent: #E6E1D6;
+      --accent-foreground: #161513;
+      --border: #E2DDD2;
+      --ring: #4A6B5D;
+
+      --oklch-paper: oklch(0.968 0.008 82);
+      --oklch-card: oklch(0.985 0.004 82);
+      --oklch-muted: oklch(0.942 0.011 82);
+      --oklch-ink: oklch(0.185 0.008 60);
+      --oklch-sage: oklch(0.485 0.048 162);
+      --oklch-amber: oklch(0.565 0.135 58);
+      --oklch-plum: oklch(0.455 0.085 312);
+    }
+
+    body {
+      background-color: var(--background);
+      background-image: radial-gradient(circle at top right, rgba(74, 107, 93, 0.05), transparent 45%),
+                        radial-gradient(circle at bottom left, rgba(180, 83, 9, 0.04), transparent 45%);
+      color: var(--foreground);
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    /* Quiet Zen scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--muted);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CFC9BC;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #B8B1A2;
+    }
+
+    .zen-active-sage {
+      box-shadow: 0 0 0 1px rgba(74, 107, 93, 0.22), 0 8px 20px -10px rgba(22, 21, 19, 0.14);
+    }
+    .zen-active-plum {
+      box-shadow: 0 0 0 1px rgba(109, 76, 125, 0.24), 0 8px 20px -10px rgba(22, 21, 19, 0.14);
+    }
+    .drag-active {
+      border-color: #4A6B5D !important;
+      background-color: rgba(74, 107, 93, 0.08) !important;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-background text-foreground antialiased selection:bg-zenSage/15 selection:text-zenInk">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Drag & Drop Overlay -->
+  <div id="drop-overlay" class="fixed inset-0 z-40 hidden bg-background/90 backdrop-blur-sm border border-dashed border-zenSage m-4 rounded-xl flex items-center justify-center pointer-events-none">
+    <div class="text-center p-8 bg-card border border-border rounded-xl shadow-sm">
+      <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-muted border border-border flex items-center justify-center text-zenSage">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+      </div>
+      <h2 class="text-xl font-serif font-semibold text-foreground">Drop Baseline CogniSync JSON Export</h2>
+      <p class="text-sm text-muted-foreground mt-1">Release file to parse telemetry, utterances, and gaze vectors</p>
+    </div>
+  </div>
+
+  <!-- Main Container -->
+  <div class="max-w-[1600px] mx-auto px-4 sm:px-6 py-5 space-y-5">
+
+    <!-- 1. TOP HEADER & SESSION SUMMARY BAR -->
+    <header class="bg-card border border-border rounded-xl p-4 sm:p-5 shadow-2xs">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <!-- Brand & Session Title -->
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-muted border border-border flex items-center justify-center text-zenSage shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </div>
+            <div>
+              <h1 class="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-foreground">Baseline CogniSync Interpreter</h1>
+              <p class="text-xs text-muted-foreground">Cognitive NLP Eye-Accessing &amp; SmartSpectra Facial Telemetry Explorer</p>
+            </div>
+          </div>
+
+          <!-- Metadata Status Pills -->
+          <div id="session-pills" class="flex flex-wrap items-center gap-2 pt-1 text-xs font-mono">
+            <!-- Populated dynamically from uploaded JSON -->
+          </div>
+        </div>
+
+        <!-- Actions: Upload JSON & Exports -->
+        <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+          <label id="btn-upload-json" for="json-file-input" role="button" tabindex="0" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zenInk hover:bg-zenInk/90 text-[#FBF9F5] font-medium text-xs sm:text-sm border border-zenInk transition cursor-pointer select-none">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Upload JSON
+          </label>
+          <input type="file" id="json-file-input" accept=".json,application/json" class="sr-only" />
+
+          <button id="btn-export-csv" type="button" disabled class="disabled:opacity-45 disabled:cursor-not-allowed inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-muted hover:bg-accent text-foreground border border-border font-medium text-xs sm:text-sm transition cursor-pointer">
+            <svg class="w-4 h-4 text-zenSage" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export Filtered CSV
+          </button>
+
+          <button id="btn-export-json" type="button" disabled class="disabled:opacity-45 disabled:cursor-not-allowed inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-muted hover:bg-accent text-foreground border border-border font-medium text-xs sm:text-sm transition cursor-pointer">
+            <svg class="w-4 h-4 text-zenPlum" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+            </svg>
+            Export JSON
+          </button>
+
+          <button id="btn-clear-session" type="button" title="Clear loaded session" class="hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted hover:bg-accent text-muted-foreground hover:text-foreground border border-border text-xs font-mono transition cursor-pointer">
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Stats Cards -->
+      <div id="stats-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-5 pt-4 border-t border-border">
+        <!-- Populated dynamically from uploaded JSON -->
+      </div>
+
+      <!-- Inline Upload / Parse Status & Error Feedback Strip -->
+      <div id="upload-feedback-bar" class="hidden mt-3 px-3.5 py-2.5 rounded-lg border text-xs font-mono flex items-center justify-between gap-3" role="status" aria-live="polite">
+        <span id="upload-feedback-text"></span>
+        <button id="btn-dismiss-feedback" type="button" class="text-[11px] underline opacity-80 hover:opacity-100 cursor-pointer shrink-0">Dismiss</button>
+      </div>
+    </header>
+
+    <!-- 2. INTERACTIVE TIMELINE & 2D GAZE VECTOR PLOT -->
+    <section class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+      <!-- Session Timeline Scrubber (7 cols) -->
+      <div class="xl:col-span-7 bg-card border border-border rounded-xl p-4 sm:p-5 flex flex-col justify-between">
+        <div>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 class="text-base font-serif font-semibold text-foreground flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-zenSage"></span>
+                Session Cognitive &amp; Telemetry Timeline
+              </h2>
+              <p id="timeline-subtitle" class="text-xs text-muted-foreground">Upload a session JSON file to inspect timeline segments</p>
+            </div>
+            <!-- Legend (dynamically populated from session pathways/statuses) -->
+            <div id="timeline-legend" class="flex flex-wrap items-center gap-3 text-[11px] font-mono text-muted-foreground"></div>
+          </div>
+
+          <!-- Interactive Timeline Track -->
+          <div class="relative bg-muted/70 border border-border rounded-lg p-3 mt-2">
+            <div id="timeline-canvas-wrap" class="relative h-24 w-full select-none">
+              <div id="timeline-blocks" class="relative w-full h-full"></div>
+              <div id="timeline-stall-marker" class="hidden absolute top-0 bottom-0 w-0.5 border-l-2 border-dashed border-zenAmber pointer-events-none z-10">
+                <span id="timeline-stall-label" class="whitespace-nowrap -translate-x-1/2 -top-2.5 relative inline-block px-1.5 py-0.5 rounded bg-[#FEF3C7] text-zenAmber border border-zenAmber/40 text-[10px] font-mono font-semibold"></span>
+              </div>
+            </div>
+            <div id="timeline-axis" class="flex items-center justify-between text-[10px] font-mono text-muted-foreground mt-2 pt-1.5 border-t border-border/80">
+              <span>—</span><span>—</span><span>—</span>
+            </div>
+          </div>
+
+          <!-- Timeline Hover Readout Bar -->
+        </div>
+
+        <!-- Timeline Hover Readout Bar -->
+        <div id="timeline-hover-info" class="mt-3 px-3 py-2 rounded-lg bg-muted/80 border border-border flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span class="text-muted-foreground font-mono">No session loaded. Upload a .JSON file to explore timeline segments.</span>
+          <span id="timeline-selected-badge" class="font-mono text-zenSage font-medium"></span>
+        </div>
+      </div>
+
+      <!-- 2D Gaze / Head-Pose Vector Plot (5 cols) -->
+      <div class="xl:col-span-5 bg-card border border-border rounded-xl p-4 sm:p-5 flex flex-col">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <div>
+            <h2 class="text-base font-serif font-semibold text-foreground flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-zenPlum"></span>
+              2D Gaze &amp; Head-Pose Vector Space
+            </h2>
+            <p class="text-xs text-muted-foreground">Coordinates derived from uploaded gaze samples &amp; vectors</p>
+          </div>
+          <span id="gaze-plot-count" class="text-xs font-mono px-2.5 py-1 rounded-md bg-muted border border-border text-muted-foreground">
+            0 pts
+          </span>
+        </div>
+
+        <div class="relative flex-1 min-h-[190px] bg-muted/60 border border-border rounded-lg overflow-hidden">
+          <canvas id="gaze-vector-canvas" class="w-full h-full block cursor-crosshair"></canvas>
+          <div id="gaze-tooltip" class="hidden absolute pointer-events-none z-20 px-2.5 py-1.5 rounded-md bg-card/95 border border-border text-[11px] font-mono text-foreground shadow-md"></div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-muted-foreground mt-2.5">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-[#9E9789]"></span>Session samples
+          </span>
+          <span class="inline-flex items-center gap-1.5 text-zenSage font-medium">
+            <span class="w-2.5 h-2.5 rounded-full bg-zenSage"></span>Selected trajectory
+          </span>
+          <span class="inline-flex items-center gap-1.5 text-zenPlum font-medium">
+            <span class="w-2.5 h-2.5 rounded-full bg-zenPlum"></span>Peak point
+          </span>
+          <span id="gaze-plot-bounds" class="font-mono text-muted-foreground">bounds: none</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. SEARCH & MULTI-FILTER BAR -->
+    <section class="bg-card border border-border rounded-xl p-4">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <!-- Search Input -->
+        <div class="relative flex-1">
+          <svg class="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            id="search-input"
+            type="text"
+            disabled
+            placeholder="Upload a .JSON file to search transcripts, IDs, NLP cues, directions, statuses, or raw JSON..."
+            class="w-full pl-10 pr-20 py-2 rounded-lg bg-muted/60 border border-border focus:border-zenSage focus:bg-card focus:outline-none text-sm text-foreground placeholder-muted-foreground disabled:opacity-60 transition"
+          />
+          <button id="btn-clear-search" type="button" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-card border border-border text-xs font-mono text-muted-foreground hover:text-foreground">
+            ESC
+          </button>
+        </div>
+
+        <!-- Multi-Filter Pills (dynamically generated from actual session attributes) -->
+        <div id="filter-pills" class="flex flex-wrap items-center gap-2"></div>
+      </div>
+    </section>
+
+    <!-- 4. SYNCHRONIZED UTTERANCE STREAM & DETAIL INSPECTOR (2-COLUMN LAYOUT) -->
+    <main class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+      <!-- LEFT COLUMN: Scrollable Utterance Stream (5 cols) -->
+      <div class="lg:col-span-5 bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+        <div class="px-4 py-3.5 border-b border-border bg-muted/50 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <h2 class="text-base font-serif font-semibold text-foreground">Utterance Stream</h2>
+            <span id="stream-count-badge" class="text-xs font-mono px-2 py-0.5 rounded-md bg-card text-zenSage border border-border font-medium">0</span>
+          </div>
+          <span class="text-[11px] font-mono text-muted-foreground">Scroll list · Select to inspect</span>
+        </div>
+
+        <div id="utterance-stream-list" class="p-3 space-y-2.5 h-[440px] sm:h-[520px] lg:h-[600px] max-h-[68vh] overflow-y-auto overscroll-contain">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: Deep-Dive Inspector (7 cols) -->
+      <div class="lg:col-span-7 space-y-5">
+        <div id="inspector-panel" class="space-y-5">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * APPLICATION STATE (STARTS COMPLETELY EMPTY — NO EMBEDDED SESSION DATA)
+     * ============================================================================
+     */
+    const state = {
+      rawSession: null,
+      normalized: null,
+      selectedUtteranceId: null,
+      searchQuery: "",
+      activeFilter: "all"
+    };
+
+    /**
+     * Recursively inspects an object to extract any nested metadata/key-value pairs
+     * when top-level metadata keys vary across uploaded JSON exports.
+     */
+    function extractScalarMetadata(obj, prefix = "", depth = 0, out = {}) {
+      if (!obj || typeof obj !== "object" || depth > 2) return out;
+      for (const [k, v] of Object.entries(obj)) {
+        if (v === null || v === undefined) continue;
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          const keyPath = prefix ? `${prefix}.${k}` : k;
+          if (!(keyPath in out)) out[keyPath] = v;
+        } else if (typeof v === "object" && !Array.isArray(v) && depth < 2) {
+          extractScalarMetadata(v, prefix ? `${prefix}.${k}` : k, depth + 1, out);
+        }
+      }
+      return out;
+    }
+
+    function pickFirstPresent(sources, keys) {
+      for (const src of sources) {
+        if (!src || typeof src !== "object") continue;
+        for (const k of keys) {
+          if (src[k] !== undefined && src[k] !== null && String(src[k]).trim() !== "") {
+            return src[k];
+          }
+        }
+      }
+      return null;
+    }
+
+    /**
+     * Normalizes biometric payloads structured like:
+     * {
+     *   pulse_bpm, pulse_baseline_bpm, pulse_spike_bpm, pulse_confidence,
+     *   hrv_ms, hrv_baseline_ms, hrv_metric, hrv_confidence, hrv_delta_ms,
+     *   blink_suppression_s, blink_rate_pm, blink_detected, blink_stable,
+     *   talking_detected, talking_stable,
+     *   pulse_baseline_status, hrv_baseline_status, analysis_status
+     * }
+     * Preserves null vs 0 vs false strictly without inventing values.
+     */
+    const BIOMETRIC_KEYS = [
+      "pulse_bpm",
+      "pulse_baseline_bpm",
+      "pulse_spike_bpm",
+      "pulse_confidence",
+      "hrv_ms",
+      "hrv_baseline_ms",
+      "hrv_metric",
+      "hrv_confidence",
+      "hrv_delta_ms",
+      "blink_suppression_s",
+      "blink_rate_pm",
+      "blink_detected",
+      "blink_stable",
+      "talking_detected",
+      "talking_stable",
+      "pulse_baseline_status",
+      "hrv_baseline_status",
+      "analysis_status"
+    ];
+
+    function normalizeBiometricPayload(rawBio) {
+      if (rawBio === undefined || rawBio === null) return null;
+      if (typeof rawBio !== "object" || Array.isArray(rawBio)) {
+        return { _scalarValue: rawBio };
+      }
+
+      const out = {};
+      for (const key of BIOMETRIC_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(rawBio, key)) {
+          out[key] = rawBio[key];
+        } else {
+          out[key] = null;
+        }
+      }
+      // Include any extra biometric keys present on the object
+      for (const [k, v] of Object.entries(rawBio)) {
+        if (!Object.prototype.hasOwnProperty.call(out, k)) {
+          out[k] = v;
+        }
+      }
+      return out;
+    }
+
+    function hasAnyBiometricKey(obj) {
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+      return BIOMETRIC_KEYS.some((k) => Object.prototype.hasOwnProperty.call(obj, k));
+    }
+
+    function formatStrictScalar(val, suffix = "") {
+      if (val === null || val === undefined) {
+        return { text: "null", kind: "null" };
+      }
+      if (typeof val === "boolean") {
+        return { text: val ? "true" : "false", kind: val ? "bool-true" : "bool-false" };
+      }
+      if (typeof val === "number") {
+        if (!Number.isFinite(val)) return { text: String(val), kind: "null" };
+        return { text: `${val}${suffix}`, kind: val === 0 ? "zero" : "number" };
+      }
+      if (typeof val === "string") {
+        return { text: val, kind: "status" };
+      }
+      return { text: JSON.stringify(val), kind: "status" };
+    }
+
+    function getBiometricBadgeStyle(statusVal) {
+      if (typeof statusVal !== "string" || !statusVal.trim()) {
+        return "bg-muted text-muted-foreground border-border";
+      }
+      const norm = statusVal.toLowerCase();
+      if (norm.includes("no_biometric") || norm.includes("awaiting") || norm.includes("missing") || norm.includes("error")) {
+        return "bg-[#FEF3C7] text-zenAmber border-zenAmber/35";
+      }
+      if (norm.includes("collecting") || norm.includes("calibrating") || norm.includes("pending")) {
+        return "bg-[#F3EEF6] text-zenPlum border-zenPlum/35";
+      }
+      if (norm.includes("ready") || norm.includes("active") || norm.includes("valid") || norm.includes("ok")) {
+        return "bg-[#E6EFEA] text-zenSage border-zenSage/35";
+      }
+      return "bg-muted text-foreground border-border";
+    }
+
+    /**
+     * Collects nested candidate objects from a stream/utterance item so fields
+     * inside `gaze_analysis`, `telemetry`, `gaze`, `speech`, `utterance`, `blink_analysis`,
+     * or `presage_biometrics` are reliably surfaced without dropping the item.
+     */
+    function collectItemBranches(item) {
+      if (!item || typeof item !== "object") return [];
+      const branches = [item];
+      const subKeys = [
+        "utterance",
+        "speech",
+        "transcript_info",
+        "gaze_analysis",
+        "gaze",
+        "head_pose",
+        "telemetry",
+        "blink_analysis",
+        "blinks",
+        "presage_biometrics",
+        "biometrics",
+        "vitals",
+        "nlp_analysis",
+        "nlp"
+      ];
+      for (const k of subKeys) {
+        if (item[k] && typeof item[k] === "object" && !Array.isArray(item[k])) {
+          branches.push(item[k]);
+        }
+      }
+      return branches;
+    }
+
+    function parseTimestampSeconds(val, msVal) {
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
+        if (typeof val === "number" && Number.isFinite(val)) return val;
+        const asNum = Number(val);
+        if (Number.isFinite(asNum)) return asNum;
+        // Support "MM:SS.mmm" or "HH:MM:SS.mmm" strings
+        const str = String(val).trim();
+        if (/^-?\d{1,3}:\d{2}(?::\d{2})?(?:\.\d+)?$/.test(str)) {
+          const parts = str.split(":").map(Number);
+          if (parts.length === 2 && parts.every(Number.isFinite)) {
+            return parts[0] * 60 + parts[1];
+          }
+          if (parts.length === 3 && parts.every(Number.isFinite)) {
+            return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          }
+        }
+      }
+      if (msVal !== undefined && msVal !== null && String(msVal).trim() !== "") {
+        const msNum = Number(msVal);
+        if (Number.isFinite(msNum)) return msNum / 1000;
+      }
+      return null;
+    }
+
+    /**
+     * Defensively normalizes whatever JSON structure the user uploads or pastes.
+     * Explicitly supports `utterance_telemetry_stream`, `utterances`, `segments`,
+     * `events`, `transcript`, root arrays, single items, and biometric payloads.
+     */
+    function normalizeSessionData(raw, fileName = null) {
+      if (raw === null || typeof raw !== "object") {
+        throw new Error("Invalid JSON root: expected a JSON object or array.");
+      }
+
+      const warnings = [];
+      const metaSources = [];
+      if (!Array.isArray(raw)) {
+        metaSources.push(
+          raw.export_metadata,
+          raw.metadata,
+          raw.session_metadata,
+          raw.session,
+          raw.session_info,
+          raw.config,
+          raw
+        );
+      }
+
+      // Locate utterance/telemetry stream list dynamically
+      let rawUtterances = [];
+      let utteranceSourceKey = null;
+      if (Array.isArray(raw)) {
+        rawUtterances = raw;
+        utteranceSourceKey = "root[]";
+      } else {
+        const candidateKeys = [
+          "utterance_telemetry_stream",
+          "utterances",
+          "segments",
+          "events",
+          "transcript",
+          "items",
+          "records",
+          "turns",
+          "entries"
+        ];
+        for (const key of candidateKeys) {
+          if (Array.isArray(raw[key])) {
+            rawUtterances = raw[key];
+            utteranceSourceKey = key;
+            if (key !== "utterances") warnings.push(`Detected array "${key}"`);
+            break;
+          }
+        }
+        // Fallback: if no known array key exists, check if any top-level array contains object items
+        if (!utteranceSourceKey) {
+          for (const [key, val] of Object.entries(raw)) {
+            if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
+              rawUtterances = val;
+              utteranceSourceKey = key;
+              warnings.push(`Detected array "${key}"`);
+              break;
+            }
+          }
+        }
+        // Fallback: single utterance or standalone biometric/telemetry object pasted directly
+        if (!utteranceSourceKey) {
+          const nestedBio = raw.presage_biometrics ?? raw.biometrics ?? raw.vitals ?? null;
+          if (hasAnyBiometricKey(raw) || hasAnyBiometricKey(nestedBio) || raw.gaze_analysis || raw.utterance_id || raw.spoken_text) {
+            const wrappedItem = hasAnyBiometricKey(raw) && !nestedBio && !raw.gaze_analysis && !raw.utterance_id
+              ? {
+                  utterance_id: raw.utterance_id || raw.segment_id || raw.id || "biometric-payload-1",
+                  spoken_text: raw.spoken_text || raw.text || raw.transcript || "Standalone biometric payload",
+                  analysis_status: raw.analysis_status || null,
+                  presage_biometrics: raw
+                }
+              : {
+                  utterance_id: raw.utterance_id || raw.segment_id || raw.id || "item-1",
+                  ...raw
+                };
+            rawUtterances = [wrappedItem];
+            utteranceSourceKey = "single_record";
+            warnings.push("Wrapped single JSON object as 1 record");
+          }
+        }
+      }
+
+      if (!Array.isArray(rawUtterances) || rawUtterances.length === 0) {
+        throw new Error("No utterance_telemetry_stream, utterances, segments, events, or valid record found in the JSON.");
+      }
+
+      // Locate sensor samples (gaze & blinks) dynamically across possible keys
+      const sensorSources = !Array.isArray(raw)
+        ? [raw.sensor_samples, raw.telemetry, raw.sensors, raw.eye_tracking, raw.gaze_data, raw]
+        : [];
+
+      const gazeSamples = (() => {
+        for (const src of sensorSources) {
+          if (!src || typeof src !== "object") continue;
+          for (const k of ["gaze", "gaze_samples", "gazeSamples", "gaze_points", "samples", "eye_samples", "fixations"]) {
+            if (Array.isArray(src[k])) return src[k];
+          }
+        }
+        return [];
+      })();
+
+      const blinkSamples = (() => {
+        for (const src of sensorSources) {
+          if (!src || typeof src !== "object") continue;
+          for (const k of ["blinks", "blink_events", "blinkEvents", "blinks_log"]) {
+            if (Array.isArray(src[k])) return src[k];
+          }
+        }
+        return [];
+      })();
+
+      // Index gaze & blink samples by linked utterance/segment ID if present
+      const gazeByUtterance = new Map();
+      gazeSamples.forEach((pt) => {
+        if (!pt || typeof pt !== "object") return;
+        const uid = pt.utterance_id ?? pt.segment_id ?? pt.utteranceId ?? pt.segmentId ?? pt.id;
+        if (uid !== undefined && uid !== null && String(uid).trim() !== "") {
+          const key = String(uid);
+          if (!gazeByUtterance.has(key)) gazeByUtterance.set(key, []);
+          gazeByUtterance.get(key).push(pt);
+        }
+      });
+
+      const blinksByUtterance = new Map();
+      blinkSamples.forEach((blk) => {
+        if (!blk || typeof blk !== "object") return;
+        const uid = blk.utterance_id ?? blk.segment_id ?? blk.utteranceId ?? blk.segmentId;
+        if (uid !== undefined && uid !== null && String(uid).trim() !== "") {
+          const key = String(uid);
+          if (!blinksByUtterance.has(key)) blinksByUtterance.set(key, []);
+          blinksByUtterance.get(key).push(blk);
+        }
+      });
+
+      const extractedMeta = extractScalarMetadata(!Array.isArray(raw) ? (raw.export_metadata || raw.metadata || raw.session || raw) : {});
+      const topLevelKeys = !Array.isArray(raw) ? Object.keys(raw) : [];
+      const streamSampleKeys = Array.from(
+        new Set(
+          rawUtterances.slice(0, 10).flatMap((item) => (item && typeof item === "object" ? Object.keys(item) : []))
+        )
+      );
+
+      let derivedFallbackCount = 0;
+
+      const utterances = rawUtterances.map((u, idx) => {
+        const safeU = (u && typeof u === "object") ? u : { value: u };
+        const branches = collectItemBranches(safeU);
+        const gazeAnalysis = (safeU.gaze_analysis && typeof safeU.gaze_analysis === "object") ? safeU.gaze_analysis : {};
+
+        const rawId = pickFirstPresent(branches, ["utterance_id", "segment_id", "utteranceId", "segmentId", "id", "turn_id"]);
+        const id = rawId !== null ? String(rawId) : `stream-${String(idx + 1).padStart(4, "0")}`;
+
+        const startRaw = pickFirstPresent(branches, ["start_time_s", "start_s", "startTime", "start", "timestamp_start", "timestamp_s", "timestamp", "begin"]);
+        const startMsRaw = pickFirstPresent(branches, ["timestamp_start_ms", "start_ms", "startTimeMs"]);
+        const start = parseTimestampSeconds(startRaw, startMsRaw);
+
+        const endRaw = pickFirstPresent(branches, ["end_time_s", "end_s", "endTime", "end", "timestamp_end", "finish"]);
+        const endMsRaw = pickFirstPresent(branches, ["timestamp_end_ms", "end_ms", "endTimeMs"]);
+        const end = parseTimestampSeconds(endRaw, endMsRaw);
+
+        const rawDur = pickFirstPresent(branches, ["duration_s", "durationS", "duration"]);
+        const parsedDur = Number(rawDur);
+        const hasExplicitDur = rawDur !== null && Number.isFinite(parsedDur);
+
+        const resolvedEnd = end !== null
+          ? end
+          : (start !== null && hasExplicitDur ? Number((start + parsedDur).toFixed(4)) : null);
+
+        const duration = hasExplicitDur
+          ? Number(parsedDur.toFixed(4))
+          : (start !== null && resolvedEnd !== null ? Number(Math.max(0, resolvedEnd - start).toFixed(4)) : null);
+
+        // Extract spoken/transcript text across possible fields, with safe fallback so no item is blank
+        const textVal = pickFirstPresent(branches, [
+          "spoken_text",
+          "transcript",
+          "text",
+          "utterance_text",
+          "utterance",
+          "content",
+          "message",
+          "label"
+        ]);
+        let spokenText = null;
+        if (textVal !== null) {
+          spokenText = typeof textVal === "string" ? textVal : JSON.stringify(textVal);
+        } else {
+          derivedFallbackCount += 1;
+          spokenText = `Telemetry record ${id}`;
+        }
+
+        // Linked gaze points by ID first, then by timestamp window if timestamps exist
+        let linkedGaze = gazeByUtterance.get(id) || [];
+        if (linkedGaze.length === 0 && gazeSamples.length > 0 && start !== null && resolvedEnd !== null) {
+          linkedGaze = gazeSamples.filter((g) => {
+            if (!g || typeof g !== "object") return false;
+            const t = Number(g.timestamp_s ?? g.timestamp ?? g.t ?? g.time_s ?? g.time);
+            return Number.isFinite(t) && t >= start && t <= resolvedEnd;
+          });
+        }
+
+        let linkedBlinks = blinksByUtterance.get(id) || [];
+        if (linkedBlinks.length === 0 && blinkSamples.length > 0 && start !== null && resolvedEnd !== null) {
+          linkedBlinks = blinkSamples.filter((b) => {
+            if (!b || typeof b !== "object") return false;
+            const t = Number(b.timestamp_s ?? b.timestamp ?? b.t ?? b.time_s ?? b.time);
+            return Number.isFinite(t) && t >= start && t <= resolvedEnd;
+          });
+        }
+
+        const blinkObj = (safeU.blink_analysis && typeof safeU.blink_analysis === "object")
+          ? safeU.blink_analysis
+          : ((safeU.blinks && typeof safeU.blinks === "object" && !Array.isArray(safeU.blinks))
+            ? safeU.blinks
+            : (Array.isArray(safeU.blink_events) ? { event_ids: safeU.blink_events, blink_count: safeU.blink_events.length } : null));
+
+        const rawGazeCount = pickFirstPresent(branches, [
+          "gaze_sample_count",
+          "gazeSampleCount",
+          "sample_count",
+          "samples_count",
+          "gaze_count",
+          "total_gaze_samples"
+        ]);
+        const parsedGazeCount = Number(rawGazeCount);
+        const hasGazeCountField = rawGazeCount !== null && Number.isFinite(parsedGazeCount);
+
+        const hasGazeAnalysisVectors = Boolean(
+          gazeAnalysis.primary_vector ||
+          gazeAnalysis.peak_vector ||
+          gazeAnalysis.during_utterance_vector ||
+          gazeAnalysis.primary_nlp_code ||
+          gazeAnalysis.primary_direction ||
+          gazeAnalysis.peak_sample_id
+        );
+
+        const gazeSampleCount = hasGazeCountField
+          ? Math.max(0, parsedGazeCount)
+          : (linkedGaze.length > 0 ? linkedGaze.length : (hasGazeAnalysisVectors ? 1 : 0));
+
+        const rawBlinkCount = pickFirstPresent(branches, [
+          "blink_event_count",
+          "blinkEventCount",
+          "blink_count",
+          "blinks_count",
+          "total_blinks"
+        ]);
+        const parsedBlinkCount = Number(rawBlinkCount);
+        const hasBlinkCountField = rawBlinkCount !== null && Number.isFinite(parsedBlinkCount);
+
+        const blinkEventCount = hasBlinkCountField
+          ? Math.max(0, parsedBlinkCount)
+          : (blinkObj && Array.isArray(blinkObj.event_ids) ? blinkObj.event_ids.length : linkedBlinks.length);
+
+        const rawNlpCode = pickFirstPresent([gazeAnalysis, safeU, ...branches], [
+          "primary_nlp_code",
+          "nlp_code",
+          "primaryNlpCode",
+          "nlp_cue",
+          "eye_accessing_cue",
+          "eye_cue",
+          "cue",
+          "nlp"
+        ]);
+        const nlpCode = rawNlpCode !== null && String(rawNlpCode).trim() !== ""
+          ? String(rawNlpCode).trim()
+          : null;
+
+        const nlpLabel = pickFirstPresent([gazeAnalysis, safeU, ...branches], [
+          "primary_classification",
+          "classification",
+          "nlp_cue_label",
+          "nlp_label",
+          "cue_label"
+        ]);
+        const primaryDirection = pickFirstPresent([gazeAnalysis, safeU, ...branches], [
+          "primary_direction",
+          "during_utterance_direction",
+          "direction",
+          "gaze_direction",
+          "eye_direction",
+          "head_direction"
+        ]);
+        const cognitivePathway = pickFirstPresent([gazeAnalysis, safeU, ...branches], [
+          "primary_cognitive_type",
+          "cognitive_type",
+          "cognitive_pathway",
+          "pathway",
+          "category"
+        ]);
+        const analysisStatus = pickFirstPresent([safeU, ...branches], ["analysis_status", "status", "state"]);
+
+        // Extract gaze vectors from gaze_analysis / utterance / linked gaze points
+        let gazeVectors = null;
+        const rawVecObj = safeU.gaze_vectors ?? safeU.gazeVectors ?? safeU.vectors ?? null;
+        if (rawVecObj && typeof rawVecObj === "object") {
+          gazeVectors = rawVecObj;
+        } else if (
+          gazeAnalysis.primary_vector ||
+          gazeAnalysis.during_utterance_vector ||
+          gazeAnalysis.peak_vector ||
+          gazeAnalysis.variance_x !== undefined ||
+          gazeAnalysis.variance_y !== undefined ||
+          gazeAnalysis.peak_deviation !== undefined ||
+          gazeAnalysis.peak_sample_id !== undefined ||
+          gazeAnalysis.during_utterance_direction !== undefined
+        ) {
+          const varXNum = Number(gazeAnalysis.variance_x);
+          const varYNum = Number(gazeAnalysis.variance_y);
+          const peakDevNum = Number(gazeAnalysis.peak_deviation);
+          gazeVectors = {
+            primary_vector: gazeAnalysis.primary_vector || null,
+            during_utterance_vector: gazeAnalysis.during_utterance_vector || null,
+            peak_vector: gazeAnalysis.peak_vector || null,
+            peak_deviation: Number.isFinite(peakDevNum) ? peakDevNum : null,
+            peak_sample_id: gazeAnalysis.peak_sample_id ?? null,
+            during_utterance_direction: gazeAnalysis.during_utterance_direction ?? null,
+            variance_x: Number.isFinite(varXNum) ? varXNum : null,
+            variance_y: Number.isFinite(varYNum) ? varYNum : null
+          };
+        } else if (linkedGaze.length > 0) {
+          const validCoords = linkedGaze
+            .map((p) => {
+              if (!p || typeof p !== "object") return null;
+              const x = Number(p.x ?? p.gaze_x ?? p.norm_x);
+              const y = Number(p.y ?? p.gaze_y ?? p.norm_y);
+              return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+            })
+            .filter(Boolean);
+
+          if (validCoords.length > 0) {
+            const first = validCoords[0];
+            const mid = validCoords[Math.floor(validCoords.length / 2)];
+            let peak = validCoords[0];
+            let maxNorm = -1;
+            let sumX = 0;
+            let sumY = 0;
+            validCoords.forEach((c) => {
+              sumX += c.x;
+              sumY += c.y;
+              const mag = Math.hypot(c.x, c.y);
+              if (mag > maxNorm) {
+                maxNorm = mag;
+                peak = c;
+              }
+            });
+            const meanX = sumX / validCoords.length;
+            const meanY = sumY / validCoords.length;
+            const varX = validCoords.reduce((s, c) => s + Math.pow(c.x - meanX, 2), 0) / validCoords.length;
+            const varY = validCoords.reduce((s, c) => s + Math.pow(c.y - meanY, 2), 0) / validCoords.length;
+
+            gazeVectors = {
+              pre_speech: first,
+              during_utterance: mid,
+              peak_deviation: peak,
+              variance_x: varX,
+              variance_y: varY
+            };
+          }
+        }
+
+        const eventIds = blinkObj && Array.isArray(blinkObj.event_ids)
+          ? blinkObj.event_ids.map((ev) => (typeof ev === "object" && ev !== null ? (ev.event_id ?? ev.id ?? JSON.stringify(ev)) : String(ev)))
+          : linkedBlinks.map((b, bi) => (b && typeof b === "object" ? (b.event_id ?? b.id) : null) || `${id}-blk-${bi + 1}`);
+
+        const rawRate = blinkObj ? Number(blinkObj.blink_rate_per_minute ?? blinkObj.blink_rate_pm ?? blinkObj.rate_per_min) : NaN;
+        const blinkRatePerMin = Number.isFinite(rawRate)
+          ? rawRate
+          : (duration !== null && duration > 0 && blinkEventCount > 0
+            ? Number(((blinkEventCount / duration) * 60).toFixed(1))
+            : null);
+
+        const rawBiometrics = safeU.presage_biometrics ?? safeU.biometrics ?? safeU.vitals ?? (hasAnyBiometricKey(safeU) ? safeU : null);
+        const biometrics = normalizeBiometricPayload(rawBiometrics);
+        const bioStatus = biometrics && typeof biometrics === "object"
+          ? (biometrics.analysis_status || biometrics.pulse_baseline_status || biometrics.hrv_baseline_status || null)
+          : null;
+        const rawNote = pickFirstPresent(branches, ["diagnostic_note", "diagnosticNote", "note", "notes", "error", "reason"]);
+
+        const hasGaze = gazeSampleCount > 0 || linkedGaze.length > 0 || Boolean(gazeVectors);
+        const statusCandidate = String(analysisStatus || bioStatus || "").toUpperCase();
+        const isMissingStatus = statusCandidate.includes("NO_SAMPLE") || statusCandidate.includes("NO_BIOMETRIC") || statusCandidate.includes("MISSING") || statusCandidate.includes("STALL") || statusCandidate.includes("ERROR") || statusCandidate.includes("FAIL");
+        const hasTelemetry = hasGaze && !isMissingStatus;
+
+        const tsStartStr = safeU.timestamp_start ?? (start !== null ? formatPreciseSec(start) : null);
+        const tsEndStr = safeU.timestamp_end ?? (resolvedEnd !== null ? formatPreciseSec(resolvedEnd) : null);
+        const handednessSetting = pickFirstPresent(branches, ["handedness_setting", "handedness", "handedness_mode"]);
+
+        return {
+          index: idx,
+          utterance_id: id,
+          start_time_s: start,
+          end_time_s: resolvedEnd,
+          duration_s: duration,
+          timestamp_start_str: tsStartStr,
+          timestamp_end_str: tsEndStr,
+          timestamp_start_ms: safeU.timestamp_start_ms ?? null,
+          timestamp_end_ms: safeU.timestamp_end_ms ?? null,
+          timestamp_basis: safeU.timestamp_basis ?? null,
+          handedness_setting: handednessSetting ? String(handednessSetting) : null,
+          spoken_text: spokenText,
+          analysis_status: analysisStatus ? String(analysisStatus) : (bioStatus ? String(bioStatus) : null),
+          has_telemetry: hasTelemetry,
+          has_gaze: hasGaze,
+          primary_nlp_code: nlpCode,
+          nlp_cue_label: nlpLabel ? String(nlpLabel) : null,
+          cognitive_pathway: cognitivePathway ? String(cognitivePathway) : null,
+          primary_direction: primaryDirection ? String(primaryDirection) : null,
+          gaze_sample_count: gazeSampleCount,
+          blink_event_count: blinkEventCount,
+          gaze_vectors: gazeVectors,
+          gaze_analysis: gazeAnalysis,
+          blink_analysis: {
+            event_ids: eventIds,
+            blink_rate_per_minute: blinkRatePerMin
+          },
+          biometrics,
+          diagnostic_note: rawNote ? String(rawNote) : null,
+          linked_gaze: linkedGaze,
+          extra_keys: Object.keys(safeU),
+          _raw: safeU
+        };
+      });
+
+      if (derivedFallbackCount > 0) {
+        warnings.push(`${derivedFallbackCount} item(s) used fallback label`);
+      }
+
+      // Compute timeline bounds strictly from utterances that have timestamps + optional metadata duration
+      const startTimes = utterances.map((u) => u.start_time_s).filter((v) => typeof v === "number" && Number.isFinite(v));
+      const endTimes = utterances.map((u) => u.end_time_s).filter((v) => typeof v === "number" && Number.isFinite(v));
+      const hasTimeline = startTimes.length > 0 || endTimes.length > 0;
+
+      const minStart = startTimes.length > 0 ? Math.min(...startTimes) : 0;
+      const maxEndFromUtterances = endTimes.length > 0
+        ? Math.max(...endTimes)
+        : (startTimes.length > 0 ? Math.max(...startTimes) : 0);
+
+      const metaDurRaw = pickFirstPresent(metaSources, ["duration_s", "durationS", "total_duration_s", "session_duration_s", "duration"]);
+      const parsedMetaDur = Number(metaDurRaw);
+      const hasMetaDur = metaDurRaw !== null && Number.isFinite(parsedMetaDur) && parsedMetaDur > 0;
+
+      const timelineStart = minStart < 0 ? minStart : 0;
+      const timelineEnd = hasMetaDur
+        ? Math.max(parsedMetaDur, maxEndFromUtterances)
+        : maxEndFromUtterances;
+      const timelineSpan = hasTimeline || hasMetaDur ? Math.max(0.001, timelineEnd - timelineStart) : 0;
+
+      // Detect gap or telemetry drop strictly from actual utterance timestamps & has_telemetry
+      let stallTimestamp = null;
+      let stallDescription = null;
+      for (let i = 1; i < utterances.length; i++) {
+        const prev = utterances[i - 1];
+        const curr = utterances[i];
+        if (prev.has_telemetry && !curr.has_telemetry && typeof prev.end_time_s === "number") {
+          stallTimestamp = prev.end_time_s;
+          stallDescription = `Telemetry gap after ${prev.utterance_id} at ${formatPreciseSec(prev.end_time_s)}s`;
+          break;
+        }
+        if (typeof prev.end_time_s === "number" && typeof curr.start_time_s === "number") {
+          const gap = curr.start_time_s - prev.end_time_s;
+          if (gap > 5.0) {
+            stallTimestamp = prev.end_time_s;
+            stallDescription = `${gap.toFixed(1)}s timestamp gap (${prev.utterance_id} → ${curr.utterance_id})`;
+            break;
+          }
+        }
+      }
+
+      const explicitWarning = pickFirstPresent(metaSources, ["pipeline_warning", "warning", "alert", "stall_warning"]);
+      const pipelineWarning = explicitWarning ? String(explicitWarning) : stallDescription;
+
+      // Compute summary metrics strictly from uploaded data
+      const totalUtterances = utterances.length;
+      const utterancesWithTelemetry = utterances.filter((u) => u.has_telemetry).length;
+      const utterancesWithBiometrics = utterances.filter((u) => Boolean(u.biometrics)).length;
+      const sumGazeFromUtterances = utterances.reduce((acc, u) => acc + (u.gaze_sample_count || 0), 0);
+      const totalGazeSamples = gazeSamples.length > 0 ? gazeSamples.length : sumGazeFromUtterances;
+
+      const sumBlinksFromUtterances = utterances.reduce((acc, u) => acc + (u.blink_event_count || 0), 0);
+      const totalBlinkEvents = blinkSamples.length > 0 ? blinkSamples.length : sumBlinksFromUtterances;
+
+      const nlpCueCount = utterances.filter((u) => Boolean(u.primary_nlp_code)).length;
+      const coveragePct = totalUtterances > 0 ? Math.round((utterancesWithTelemetry / totalUtterances) * 100) : 0;
+
+      // Collect all numeric (x, y) gaze coordinates present in the file
+      const plottedPoints = [];
+      gazeSamples.forEach((pt, idx) => {
+        if (!pt || typeof pt !== "object") return;
+        const x = Number(pt.x ?? pt.gaze_x ?? pt.norm_x);
+        const y = Number(pt.y ?? pt.gaze_y ?? pt.norm_y);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          const t = Number(pt.timestamp_s ?? pt.timestamp ?? pt.t ?? pt.time_s ?? pt.time);
+          plottedPoints.push({
+            x,
+            y,
+            timestamp_s: Number.isFinite(t) ? t : null,
+            utterance_id: pt.utterance_id ?? pt.segment_id ?? pt.utteranceId ?? pt.id ?? null,
+            index: idx
+          });
+        }
+      });
+
+      // Collect coordinates from utterance gaze_vectors if top-level gazeSamples is empty or sparse
+      utterances.forEach((u) => {
+        if (!u.gaze_vectors || typeof u.gaze_vectors !== "object") return;
+        ["primary_vector", "during_utterance_vector", "peak_vector", "pre_speech", "during_utterance", "peak_deviation"].forEach((stage) => {
+          const vec = u.gaze_vectors[stage];
+          if (vec && typeof vec === "object") {
+            const x = Number(vec.x);
+            const y = Number(vec.y);
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              plottedPoints.push({
+                x,
+                y,
+                timestamp_s: u.start_time_s,
+                utterance_id: u.utterance_id,
+                stage
+              });
+            }
+          }
+        });
+      });
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      plottedPoints.forEach((p) => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+      const hasCoordinates = plottedPoints.length > 0 && Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY);
+      const maxAbsCoord = hasCoordinates
+        ? Math.max(0.01, Math.abs(minX), Math.abs(maxX), Math.abs(minY), Math.abs(maxY))
+        : null;
+
+      // Extract metadata fields strictly if present in JSON
+      const resolvedFileName = fileName || pickFirstPresent(metaSources, ["file_name", "filename", "fileName"]) || "Uploaded JSON";
+      const sessionId = pickFirstPresent(metaSources, ["session_id", "sessionId", "id"]) || null;
+      const sessionMode = pickFirstPresent(metaSources, ["session_mode", "sessionMode", "mode"]) || null;
+      const handedness = pickFirstPresent(metaSources, ["handedness_mode", "resolved_handedness", "handedness", "handednessMode", "handedness_setting"]) || null;
+      const estimator = pickFirstPresent(metaSources, ["landmark_estimator", "estimator", "face_estimator", "model"]) || null;
+      const schemaVersion = pickFirstPresent(metaSources, ["schema_version", "schemaVersion", "version"]) || null;
+
+      const metaDurationFormatted = pickFirstPresent(metaSources, ["duration_formatted", "durationFormatted"]);
+      const durationFormatted = metaDurationFormatted
+        ? String(metaDurationFormatted)
+        : (hasTimeline || hasMetaDur ? formatMMSS(timelineSpan) : null);
+
+      // Unique pathways & NLP codes discovered in the uploaded utterances
+      const uniquePathways = [...new Set(utterances.map((u) => u.cognitive_pathway).filter(Boolean))];
+      const uniqueNlpCodes = [...new Set(utterances.map((u) => u.primary_nlp_code).filter(Boolean))];
+
+      return {
+        fileName: String(resolvedFileName),
+        sessionId: sessionId ? String(sessionId) : null,
+        sessionMode: sessionMode ? String(sessionMode) : null,
+        handedness: handedness ? String(handedness) : null,
+        estimator: estimator ? String(estimator) : null,
+        schemaVersion: schemaVersion ? String(schemaVersion) : null,
+        utteranceSourceKey,
+        topLevelKeys,
+        streamSampleKeys,
+        hasTimeline: hasTimeline || hasMetaDur,
+        timelineStart,
+        timelineEnd,
+        timelineSpan,
+        durationS: hasTimeline || hasMetaDur ? timelineSpan : null,
+        durationFormatted,
+        pipelineWarning,
+        stallTimestamp,
+        plottedPoints,
+        gazeBounds: hasCoordinates
+          ? { minX, maxX, minY, maxY, maxAbsCoord, hasCoordinates: true }
+          : { minX: null, maxX: null, minY: null, maxY: null, maxAbsCoord: null, hasCoordinates: false },
+        uniquePathways,
+        uniqueNlpCodes,
+        extractedMeta,
+        warnings,
+        utterances,
+        gazeSamples,
+        blinkSamples,
+        stats: {
+          totalUtterances,
+          utterancesWithTelemetry,
+          utterancesWithBiometrics,
+          totalGazeSamples,
+          totalBlinkEvents,
+          nlpCueCount,
+          coveragePct
+        }
+      };
+    }
+
+    /**
+     * ============================================================================
+     * FORMATTERS & UTILITIES
+     * ============================================================================
+     */
+    function formatPreciseSec(sec) {
+      const n = Number(sec);
+      if (!Number.isFinite(n)) return "—";
+      const sign = n < 0 ? "-" : "";
+      const abs = Math.abs(n);
+      const mins = Math.floor(abs / 60);
+      const rem = (abs % 60).toFixed(3).padStart(6, "0");
+      return `${sign}${String(mins).padStart(2, "0")}:${rem}`;
+    }
+
+    function formatMMSS(sec) {
+      const n = Number(sec);
+      if (!Number.isFinite(n)) return "—";
+      const total = Math.max(0, Math.round(n));
+      const mins = Math.floor(total / 60);
+      const rem = total % 60;
+      return `${String(mins).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
+    }
+
+    function formatTimeRange(u) {
+      const hasS = typeof u.start_time_s === "number" && Number.isFinite(u.start_time_s);
+      const hasE = typeof u.end_time_s === "number" && Number.isFinite(u.end_time_s);
+      if (hasS && hasE) return `${formatPreciseSec(u.start_time_s)} → ${formatPreciseSec(u.end_time_s)}`;
+      if (hasS) return `t = ${formatPreciseSec(u.start_time_s)}`;
+      if (hasE) return `end = ${formatPreciseSec(u.end_time_s)}`;
+      return `index #${u.index + 1}`;
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showToast(message, type = "info") {
+      const container = document.getElementById("toast-container");
+      if (!container) return;
+      const toast = document.createElement("div");
+      const colors = type === "error"
+        ? "bg-[#FEF2F2] border-rose-300 text-rose-900"
+        : type === "success"
+          ? "bg-zenInk border-zenInk text-[#FBF9F5]"
+          : "bg-card border-border text-foreground";
+      toast.className = `pointer-events-auto px-4 py-2.5 rounded-lg border text-xs font-mono shadow-md transition-all duration-300 ${colors}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add("opacity-0", "translate-y-2");
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+
+    function setUploadFeedback(message, level = "info") {
+      const bar = document.getElementById("upload-feedback-bar");
+      const textEl = document.getElementById("upload-feedback-text");
+      if (!bar || !textEl) return;
+
+      bar.classList.remove(
+        "hidden",
+        "bg-[#FEF2F2]", "border-rose-300", "text-rose-900",
+        "bg-[#FEF3C7]", "border-zenAmber/40", "text-zenAmber",
+        "bg-[#E6EFEA]", "border-zenSage/35", "text-zenSage",
+        "bg-muted/80", "border-border", "text-foreground"
+      );
+
+      if (level === "error") {
+        bar.classList.add("bg-[#FEF2F2]", "border-rose-300", "text-rose-900");
+      } else if (level === "warn") {
+        bar.classList.add("bg-[#FEF3C7]", "border-zenAmber/40", "text-zenAmber");
+      } else if (level === "success") {
+        bar.classList.add("bg-[#E6EFEA]", "border-zenSage/35", "text-zenSage");
+      } else {
+        bar.classList.add("bg-muted/80", "border-border", "text-foreground");
+      }
+
+      textEl.textContent = message;
+    }
+
+    function clearUploadFeedback() {
+      const bar = document.getElementById("upload-feedback-bar");
+      const textEl = document.getElementById("upload-feedback-text");
+      if (textEl) textEl.textContent = "";
+      if (bar) bar.classList.add("hidden");
+    }
+
+    function safeRender(label, renderFn) {
+      try {
+        renderFn();
+      } catch (err) {
+        console.error(`[CogniSync] Render error in ${label}:`, err);
+        setUploadFeedback(`Display warning (${label}): ${err.message}`, "warn");
+      }
+    }
+
+    function applyParsedJsonPayload(parsed, fileName = "Uploaded JSON") {
+      const normalized = normalizeSessionData(parsed, fileName);
+      state.rawSession = parsed;
+      state.normalized = normalized;
+      state.selectedUtteranceId = normalized.utterances.length > 0 ? normalized.utterances[0].utterance_id : null;
+      state.searchQuery = "";
+      state.activeFilter = "all";
+
+      const searchInput = document.getElementById("search-input");
+      if (searchInput) {
+        searchInput.value = "";
+        searchInput.disabled = false;
+      }
+      const clearSearchBtn = document.getElementById("btn-clear-search");
+      if (clearSearchBtn) clearSearchBtn.classList.add("hidden");
+
+      renderAll();
+
+      const summary = `Loaded "${normalized.fileName}" — ${normalized.stats.totalUtterances} items, ${normalized.stats.totalGazeSamples} gaze samples, ${normalized.stats.totalBlinkEvents} blinks` +
+        (normalized.warnings.length > 0 ? ` (${normalized.warnings.join(" · ")})` : "");
+      setUploadFeedback(summary, normalized.warnings.length > 0 ? "warn" : "success");
+      showToast(`Loaded ${normalized.fileName}`, "success");
+    }
+
+    function handleUploadedFile(file) {
+      if (!file) {
+        setUploadFeedback("No file selected.", "warn");
+        return;
+      }
+
+      const lowerName = (file.name || "").toLowerCase();
+      if (file.type && !file.type.includes("json") && file.type !== "text/plain" && !lowerName.endsWith(".json")) {
+        setUploadFeedback(`Unsupported file type for "${file.name}". Please select a .json file.`, "error");
+        showToast("Please choose a .json file", "error");
+        return;
+      }
+
+      setUploadFeedback(`Reading "${file.name}" (${(file.size / 1024).toFixed(1)} KB)...`, "info");
+
+      const processText = (rawText) => {
+        try {
+          if (!rawText || !String(rawText).trim()) {
+            throw new Error("The selected file is empty.");
+          }
+          const parsed = JSON.parse(rawText);
+          applyParsedJsonPayload(parsed, file.name);
+        } catch (err) {
+          const msg = `Failed to parse "${file.name}": ${err.message}`;
+          setUploadFeedback(msg, "error");
+          showToast(msg, "error");
+        }
+      };
+
+      if (typeof file.text === "function") {
+        file.text().then(processText).catch((err) => {
+          const msg = `Unable to read "${file.name}": ${err.message}`;
+          setUploadFeedback(msg, "error");
+          showToast(msg, "error");
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (ev) => processText(ev.target ? ev.target.result : "");
+      reader.onerror = () => {
+        const msg = `FileReader error while reading "${file.name}".`;
+        setUploadFeedback(msg, "error");
+        showToast(msg, "error");
+      };
+      reader.readAsText(file);
+    }
+
+    function renderAll() {
+      safeRender("Session Header", renderSessionHeader);
+      safeRender("Timeline", renderTimeline);
+      safeRender("Gaze Canvas", renderGazePlot);
+      safeRender("Filter Pills", renderFilterPills);
+      safeRender("Utterance Stream", renderUtteranceStream);
+      safeRender("Inspector", renderInspector);
+    }
+
+    function getFilteredUtterances() {
+      if (!state.normalized) return [];
+      const q = (state.searchQuery || "").trim().toLowerCase();
+      return state.normalized.utterances.filter((u) => {
+        if (state.activeFilter === "nlp" && !u.primary_nlp_code) return false;
+        if (state.activeFilter === "blinks" && (!u.blink_event_count || u.blink_event_count <= 0)) return false;
+        if (state.activeFilter === "biometrics" && !u.biometrics) return false;
+        if (state.activeFilter === "missing" && u.has_telemetry) return false;
+        if (state.activeFilter.startsWith("pathway:")) {
+          const pw = state.activeFilter.slice("pathway:".length);
+          if (u.cognitive_pathway !== pw) return false;
+        }
+        if (!q) return true;
+        const haystack = [
+          u.utterance_id,
+          u.spoken_text,
+          u.primary_nlp_code,
+          u.nlp_cue_label,
+          u.cognitive_pathway,
+          u.primary_direction,
+          u.analysis_status,
+          u.diagnostic_note
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q) || JSON.stringify(u._raw).toLowerCase().includes(q);
+      });
+    }
+
+    function renderSessionHeader() {
+      const pillsEl = document.getElementById("session-pills");
+      const statsEl = document.getElementById("stats-grid");
+      const csvBtn = document.getElementById("btn-export-csv");
+      const jsonBtn = document.getElementById("btn-export-json");
+      const clearBtn = document.getElementById("btn-clear-session");
+
+      const d = state.normalized;
+      if (!d) {
+        if (csvBtn) csvBtn.disabled = true;
+        if (jsonBtn) jsonBtn.disabled = true;
+        if (clearBtn) clearBtn.classList.add("hidden");
+        if (pillsEl) {
+          pillsEl.innerHTML = `<span class="px-2.5 py-1 rounded-md bg-muted border border-border text-muted-foreground">Awaiting .JSON file</span>`;
+        }
+        if (statsEl) {
+          statsEl.innerHTML = "";
+        }
+        return;
+      }
+
+      if (csvBtn) csvBtn.disabled = false;
+      if (jsonBtn) jsonBtn.disabled = false;
+      if (clearBtn) clearBtn.classList.remove("hidden");
+
+      const pills = [d.fileName];
+      if (d.sessionId) pills.push(`session: ${d.sessionId}`);
+      if (d.sessionMode) pills.push(`mode: ${d.sessionMode}`);
+      if (d.handedness) pills.push(`handedness: ${d.handedness}`);
+      if (d.estimator) pills.push(`estimator: ${d.estimator}`);
+      if (d.durationFormatted) pills.push(`duration: ${d.durationFormatted}`);
+
+      if (pillsEl) {
+        pillsEl.innerHTML = pills
+          .map((p, idx) => {
+            const cls = idx === 0
+              ? "bg-[#E6EFEA] text-zenSage border-zenSage/35 font-semibold"
+              : "bg-muted text-foreground border-border";
+            return `<span class="px-2.5 py-1 rounded-md border ${cls}">${escapeHtml(p)}</span>`;
+          })
+          .join("");
+      }
+
+      if (statsEl) {
+        const cards = [
+          { label: "Utterances", value: d.stats.totalUtterances, sub: `${d.stats.coveragePct}% telemetry` },
+          { label: "Gaze Samples", value: d.stats.totalGazeSamples, sub: `${d.plottedPoints.length} plotted pts` },
+          { label: "Blink Events", value: d.stats.totalBlinkEvents, sub: "detected blinks" },
+          { label: "NLP Cues", value: d.stats.nlpCueCount, sub: d.uniqueNlpCodes.length ? d.uniqueNlpCodes.join(", ") : "none mapped" },
+          { label: "Biometrics", value: d.stats.utterancesWithBiometrics, sub: `${d.stats.utterancesWithTelemetry} active stream` }
+        ];
+        statsEl.innerHTML = cards
+          .map(
+            (c) => `
+          <div class="bg-muted/60 border border-border rounded-lg px-3.5 py-2.5">
+            <div class="text-[11px] font-mono text-muted-foreground">${escapeHtml(c.label)}</div>
+            <div class="text-lg font-mono font-semibold text-foreground mt-0.5">${escapeHtml(c.value)}</div>
+            <div class="text-[11px] font-mono text-muted-foreground truncate">${escapeHtml(c.sub)}</div>
+          </div>`
+          )
+          .join("");
+      }
+    }
+
+    function renderTimeline() {
+      const blocksEl = document.getElementById("timeline-blocks");
+      const axisEl = document.getElementById("timeline-axis");
+      const subtitleEl = document.getElementById("timeline-subtitle");
+      const legendEl = document.getElementById("timeline-legend");
+      const stallEl = document.getElementById("timeline-stall-marker");
+      const stallLabelEl = document.getElementById("timeline-stall-label");
+      const hoverInfoEl = document.getElementById("timeline-hover-info");
+      const selectedBadgeEl = document.getElementById("timeline-selected-badge");
+
+      const d = state.normalized;
+      if (!d || !blocksEl) {
+        if (blocksEl) blocksEl.innerHTML = "";
+        if (stallEl) stallEl.classList.add("hidden");
+        if (axisEl) axisEl.innerHTML = `<span>—</span><span>—</span><span>—</span>`;
+        if (subtitleEl) subtitleEl.textContent = "Upload a session JSON file to inspect timeline segments";
+        if (legendEl) legendEl.innerHTML = "";
+        if (hoverInfoEl) {
+          hoverInfoEl.innerHTML = `<span class="text-muted-foreground font-mono">No session loaded. Upload a .JSON file to explore timeline segments.</span><span id="timeline-selected-badge" class="font-mono text-zenSage font-medium"></span>`;
+        }
+        return;
+      }
+
+      if (subtitleEl) {
+        subtitleEl.textContent = d.pipelineWarning || `${d.utterances.length} items · click any segment to inspect`;
+      }
+
+      if (legendEl) {
+        legendEl.innerHTML = `
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-xs bg-zenSage"></span>Active</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-xs bg-zenPlum"></span>NLP Cue</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-xs bg-zenAmber"></span>Gap / Missing</span>
+        `;
+      }
+
+      const timedUtterances = d.utterances.filter(
+        (u) => typeof u.start_time_s === "number" && Number.isFinite(u.start_time_s)
+      );
+
+      if (d.hasTimeline && d.timelineSpan > 0 && timedUtterances.length > 0) {
+        blocksEl.innerHTML = timedUtterances
+          .map((u) => {
+            const leftPct = Math.max(0, Math.min(99, ((u.start_time_s - d.timelineStart) / d.timelineSpan) * 100));
+            const rawEnd = typeof u.end_time_s === "number" && Number.isFinite(u.end_time_s)
+              ? u.end_time_s
+              : u.start_time_s + Math.max(0.25, u.duration_s || 0.5);
+            const widthPct = Math.max(1.2, Math.min(100 - leftPct, ((Math.max(u.start_time_s + 0.15, rawEnd) - u.start_time_s) / d.timelineSpan) * 100));
+            const isSelected = u.utterance_id === state.selectedUtteranceId;
+            let colorClass = "bg-zenSage/80 border-zenSage text-[#FBF9F5]";
+            if (!u.has_telemetry) colorClass = "bg-zenAmber/85 border-zenAmber text-[#FBF9F5]";
+            else if (u.primary_nlp_code) colorClass = "bg-zenPlum/85 border-zenPlum text-[#FBF9F5]";
+
+            return `
+              <button
+                type="button"
+                data-uid="${escapeHtml(u.utterance_id)}"
+                title="${escapeHtml(u.utterance_id)} (${escapeHtml(formatTimeRange(u))})"
+                style="left:${leftPct}%;width:${widthPct}%"
+                class="tl-seg absolute top-2 bottom-2 rounded-md border px-1.5 flex items-center justify-center text-[10px] font-mono truncate transition cursor-pointer ${colorClass} ${isSelected ? "ring-2 ring-zenInk z-10" : "opacity-90 hover:opacity-100"}"
+              >
+                ${escapeHtml(u.primary_nlp_code || u.utterance_id)}
+              </button>
+            `;
+          })
+          .join("");
+
+        if (axisEl) {
+          const mid = d.timelineStart + d.timelineSpan / 2;
+          axisEl.innerHTML = `
+            <span>${escapeHtml(formatPreciseSec(d.timelineStart))}</span>
+            <span>${escapeHtml(formatPreciseSec(mid))}</span>
+            <span>${escapeHtml(formatPreciseSec(d.timelineEnd))}</span>
+          `;
+        }
+      } else {
+        // Equal-width sequence blocks when timestamps are absent
+        const count = d.utterances.length;
+        const pct = 100 / Math.max(1, count);
+        blocksEl.innerHTML = d.utterances
+          .map((u, idx) => {
+            const isSelected = u.utterance_id === state.selectedUtteranceId;
+            let colorClass = "bg-zenSage/80 border-zenSage text-[#FBF9F5]";
+            if (!u.has_telemetry) colorClass = "bg-zenAmber/85 border-zenAmber text-[#FBF9F5]";
+            else if (u.primary_nlp_code) colorClass = "bg-zenPlum/85 border-zenPlum text-[#FBF9F5]";
+
+            return `
+              <button
+                type="button"
+                data-uid="${escapeHtml(u.utterance_id)}"
+                title="${escapeHtml(u.utterance_id)}"
+                style="left:${idx * pct}%;width:${Math.max(1.5, pct - 0.3)}%"
+                class="tl-seg absolute top-2 bottom-2 rounded-md border px-1 flex items-center justify-center text-[10px] font-mono truncate transition cursor-pointer ${colorClass} ${isSelected ? "ring-2 ring-zenInk z-10" : "opacity-90 hover:opacity-100"}"
+              >
+                ${escapeHtml(u.primary_nlp_code || `#${idx + 1}`)}
+              </button>
+            `;
+          })
+          .join("");
+
+        if (axisEl) {
+          axisEl.innerHTML = `
+            <span>#1</span>
+            <span>#${Math.max(1, Math.ceil(count / 2))}</span>
+            <span>#${count}</span>
+          `;
+        }
+      }
+
+      if (stallEl && stallLabelEl) {
+        if (typeof d.stallTimestamp === "number" && d.hasTimeline && d.timelineSpan > 0) {
+          const stallPct = Math.max(0, Math.min(100, ((d.stallTimestamp - d.timelineStart) / d.timelineSpan) * 100));
+          stallEl.style.left = `${stallPct}%`;
+          stallLabelEl.textContent = formatPreciseSec(d.stallTimestamp);
+          stallEl.classList.remove("hidden");
+        } else {
+          stallEl.classList.add("hidden");
+        }
+      }
+
+      blocksEl.querySelectorAll(".tl-seg").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const uid = btn.getAttribute("data-uid");
+          if (uid) selectUtterance(uid, true);
+        });
+        btn.addEventListener("mouseenter", () => {
+          const uid = btn.getAttribute("data-uid");
+          const found = d.utterances.find((x) => x.utterance_id === uid);
+          if (found && hoverInfoEl) {
+            hoverInfoEl.firstElementChild.textContent =
+              `${found.utterance_id} · ${formatTimeRange(found)} · ${found.spoken_text}`;
+          }
+        });
+      });
+
+      const activeU = d.utterances.find((u) => u.utterance_id === state.selectedUtteranceId);
+      if (selectedBadgeEl) {
+        selectedBadgeEl.textContent = activeU
+          ? `Selected: ${activeU.utterance_id}${activeU.primary_nlp_code ? ` (${activeU.primary_nlp_code})` : ""}`
+          : "";
+      }
+    }
+
+    function renderGazePlot() {
+      const canvas = document.getElementById("gaze-vector-canvas");
+      const countEl = document.getElementById("gaze-plot-count");
+      const boundsEl = document.getElementById("gaze-plot-bounds");
+      const tooltipEl = document.getElementById("gaze-tooltip");
+
+      const d = state.normalized;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(120, Math.floor(rect.width || canvas.clientWidth || 400));
+      const height = Math.max(140, Math.floor(rect.height || canvas.clientHeight || 190));
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+
+      if (!d || !d.gazeBounds.hasCoordinates) {
+        if (countEl) countEl.textContent = "0 pts";
+        if (boundsEl) boundsEl.textContent = "bounds: none";
+        if (tooltipEl) tooltipEl.classList.add("hidden");
+        ctx.fillStyle = "#5C5852";
+        ctx.font = "12px 'JetBrains Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("No gaze/vector (x, y) coordinates in JSON", width / 2, height / 2);
+        ctx.restore();
+        return;
+      }
+
+      const scale = d.gazeBounds.maxAbsCoord || 1;
+      const pad = 22;
+      const plotW = Math.max(40, width - pad * 2);
+      const plotH = Math.max(40, height - pad * 2);
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const toPx = (x, y) => ({
+        px: cx + (x / scale) * (plotW / 2),
+        py: cy - (y / scale) * (plotH / 2)
+      });
+
+      // Crosshairs
+      ctx.strokeStyle = "#DDD7C9";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pad, cy);
+      ctx.lineTo(width - pad, cy);
+      ctx.moveTo(cx, pad);
+      ctx.lineTo(cx, height - pad);
+      ctx.stroke();
+
+      // Session points
+      ctx.fillStyle = "rgba(158, 151, 137, 0.65)";
+      d.plottedPoints.forEach((pt) => {
+        const { px, py } = toPx(pt.x, pt.y);
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Selected utterance vectors
+      const selectedU = d.utterances.find((u) => u.utterance_id === state.selectedUtteranceId);
+      if (selectedU && selectedU.gaze_vectors) {
+        const vKeys = ["primary_vector", "during_utterance_vector", "pre_speech", "during_utterance"];
+        vKeys.forEach((k) => {
+          const vec = selectedU.gaze_vectors[k];
+          if (vec && typeof vec.x === "number" && typeof vec.y === "number") {
+            const { px, py } = toPx(vec.x, vec.y);
+            ctx.fillStyle = "#4A6B5D";
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+
+        const peakVec = selectedU.gaze_vectors.peak_vector || selectedU.gaze_vectors.peak_deviation;
+        if (peakVec && typeof peakVec.x === "number" && typeof peakVec.y === "number") {
+          const { px, py } = toPx(peakVec.x, peakVec.y);
+          ctx.fillStyle = "#6D4C7D";
+          ctx.beginPath();
+          ctx.arc(px, py, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      if (countEl) countEl.textContent = `${d.plottedPoints.length} pts`;
+      if (boundsEl) boundsEl.textContent = `±${scale.toFixed(2)}`;
+
+      if (!canvas.dataset.hoverBound) {
+        canvas.dataset.hoverBound = "1";
+        canvas.addEventListener("mousemove", (e) => {
+          const curD = state.normalized;
+          const curTip = document.getElementById("gaze-tooltip");
+          if (!curD || !curD.gazeBounds.hasCoordinates || !curTip) return;
+          const r = canvas.getBoundingClientRect();
+          const mx = e.clientX - r.left;
+          const my = e.clientY - r.top;
+          const sc = curD.gazeBounds.maxAbsCoord || 1;
+          const p = 22;
+          const pw = Math.max(40, r.width - p * 2);
+          const ph = Math.max(40, r.height - p * 2);
+          const midX = r.width / 2;
+          const midY = r.height / 2;
+
+          let best = null;
+          let bestDist = 14;
+          curD.plottedPoints.forEach((pt) => {
+            const px = midX + (pt.x / sc) * (pw / 2);
+            const py = midY - (pt.y / sc) * (ph / 2);
+            const dist = Math.hypot(mx - px, my - py);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = { pt, px, py };
+            }
+          });
+
+          if (best) {
+            curTip.innerHTML = `x: ${best.pt.x.toFixed(3)}, y: ${best.pt.y.toFixed(3)}${best.pt.utterance_id ? `<br/>${escapeHtml(best.pt.utterance_id)}` : ""}`;
+            curTip.style.left = `${Math.min(r.width - 130, Math.max(8, best.px + 10))}px`;
+            curTip.style.top = `${Math.max(8, best.py - 28)}px`;
+            curTip.classList.remove("hidden");
+          } else {
+            curTip.classList.add("hidden");
+          }
+        });
+        canvas.addEventListener("mouseleave", () => {
+          const curTip = document.getElementById("gaze-tooltip");
+          if (curTip) curTip.classList.add("hidden");
+        });
+      }
+
+      ctx.restore();
+    }
+
+    function renderFilterPills() {
+      const pillsWrap = document.getElementById("filter-pills");
+      if (!pillsWrap) return;
+
+      const d = state.normalized;
+      if (!d) {
+        pillsWrap.innerHTML = "";
+        return;
+      }
+
+      const defs = [
+        { key: "all", label: `All (${d.utterances.length})` },
+        { key: "nlp", label: `NLP Cues (${d.stats.nlpCueCount})` },
+        { key: "blinks", label: `Blinks (${d.utterances.filter((u) => u.blink_event_count > 0).length})` },
+        { key: "biometrics", label: `Biometrics (${d.stats.utterancesWithBiometrics})` },
+        { key: "missing", label: `Gaps (${d.utterances.filter((u) => !u.has_telemetry).length})` }
+      ];
+
+      d.uniquePathways.forEach((pw) => {
+        const cnt = d.utterances.filter((u) => u.cognitive_pathway === pw).length;
+        defs.push({ key: `pathway:${pw}`, label: `${pw} (${cnt})` });
+      });
+
+      pillsWrap.innerHTML = defs
+        .map((f) => {
+          const active = state.activeFilter === f.key;
+          return `
+            <button
+              type="button"
+              data-filter="${escapeHtml(f.key)}"
+              class="px-3 py-1.5 rounded-lg text-xs font-mono border transition cursor-pointer ${
+                active
+                  ? "bg-zenInk text-[#FBF9F5] border-zenInk font-medium"
+                  : "bg-muted/70 text-foreground border-border hover:bg-accent"
+              }"
+            >
+              ${escapeHtml(f.label)}
+            </button>
+          `;
+        })
+        .join("");
+
+      pillsWrap.querySelectorAll("button[data-filter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.activeFilter = btn.getAttribute("data-filter") || "all";
+          renderAll();
+        });
+      });
+    }
+
+    function renderUtteranceStream() {
+      const listEl = document.getElementById("utterance-stream-list");
+      const badgeEl = document.getElementById("stream-count-badge");
+      if (!listEl) return;
+
+      if (!state.normalized) {
+        if (badgeEl) badgeEl.textContent = "0";
+        listEl.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center text-center p-6 text-xs text-muted-foreground font-mono">
+            No session loaded yet. Click <span class="mx-1 px-2 py-0.5 rounded bg-muted border border-border text-foreground">Upload JSON</span> or drop a .json file.
+          </div>
+        `;
+        return;
+      }
+
+      const rows = getFilteredUtterances();
+      if (badgeEl) badgeEl.textContent = String(rows.length);
+
+      if (rows.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-6 text-center text-xs font-mono text-muted-foreground">
+            No matching items for the current filter or search.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = rows
+        .map((u) => {
+          const isSelected = u.utterance_id === state.selectedUtteranceId;
+          const nlpBadge = u.primary_nlp_code
+            ? `<span class="px-2 py-0.5 rounded bg-[#F3EEF6] text-zenPlum border border-zenPlum/30 font-mono text-[11px] font-semibold">${escapeHtml(u.primary_nlp_code)}</span>`
+            : "";
+          const dirBadge = u.primary_direction
+            ? `<span class="px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono text-[11px]">${escapeHtml(u.primary_direction)}</span>`
+            : "";
+
+          return `
+            <div
+              role="button"
+              tabindex="0"
+              data-uid="${escapeHtml(u.utterance_id)}"
+              class="utterance-card p-3.5 rounded-lg border transition cursor-pointer ${
+                isSelected
+                  ? "bg-card border-zenSage zen-active-sage"
+                  : "bg-muted/45 border-border hover:bg-card"
+              }"
+            >
+              <div class="flex items-center justify-between gap-2 text-[11px] font-mono text-muted-foreground mb-1.5">
+                <span class="font-semibold text-foreground">${escapeHtml(u.utterance_id)}</span>
+                <span>${escapeHtml(formatTimeRange(u))}</span>
+              </div>
+              <p class="text-sm text-foreground leading-snug line-clamp-2">${escapeHtml(u.spoken_text)}</p>
+              <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                ${nlpBadge}
+                ${dirBadge}
+                <span class="text-[11px] font-mono text-muted-foreground ml-auto">
+                  ${escapeHtml(u.gaze_sample_count)} gaze · ${escapeHtml(u.blink_event_count)} blink
+                </span>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      listEl.querySelectorAll(".utterance-card").forEach((card) => {
+        const uid = card.getAttribute("data-uid");
+        card.addEventListener("click", () => {
+          if (uid) selectUtterance(uid, false);
+        });
+        card.addEventListener("keydown", (e) => {
+          if ((e.key === "Enter" || e.key === " ") && uid) {
+            e.preventDefault();
+            selectUtterance(uid, false);
+          }
+        });
+      });
+    }
+
+    function renderInspector() {
+      const panelEl = document.getElementById("inspector-panel");
+      if (!panelEl) return;
+
+      if (!state.normalized) {
+        panelEl.innerHTML = `
+          <div class="bg-card border border-border rounded-xl p-6 text-xs font-mono text-muted-foreground">
+            Select or upload a session JSON file to inspect NLP cues, gaze vectors, biometrics, and raw payload fields.
+          </div>
+        `;
+        return;
+      }
+
+      const u = state.normalized.utterances.find((item) => item.utterance_id === state.selectedUtteranceId)
+        || state.normalized.utterances[0];
+
+      if (!u) {
+        panelEl.innerHTML = "";
+        return;
+      }
+
+      const bioEntries = u.biometrics && typeof u.biometrics === "object"
+        ? Object.entries(u.biometrics).map(([k, v]) => {
+            const f = formatStrictScalar(v);
+            return `
+              <div class="bg-muted/60 border border-border rounded-lg px-3 py-2">
+                <div class="text-[10px] font-mono text-muted-foreground truncate">${escapeHtml(k)}</div>
+                <div class="text-xs font-mono font-semibold text-foreground mt-0.5">${escapeHtml(f.text)}</div>
+              </div>
+            `;
+          }).join("")
+        : `<div class="text-xs font-mono text-muted-foreground">No biometric fields on this item.</div>`;
+
+      panelEl.innerHTML = `
+        <div class="bg-card border border-border rounded-xl p-4 sm:p-5 space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3.5">
+            <div>
+              <div class="text-xs font-mono text-muted-foreground">${escapeHtml(u.utterance_id)} · ${escapeHtml(formatTimeRange(u))}</div>
+              <h3 class="text-lg font-serif font-semibold text-foreground mt-1">${escapeHtml(u.spoken_text)}</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${u.primary_nlp_code ? `<span class="px-2.5 py-1 rounded-md bg-[#F3EEF6] text-zenPlum border border-zenPlum/30 font-mono text-xs font-semibold">${escapeHtml(u.primary_nlp_code)}</span>` : ""}
+              ${u.nlp_cue_label ? `<span class="px-2.5 py-1 rounded-md bg-[#E6EFEA] text-zenSage border border-zenSage/30 font-mono text-xs">${escapeHtml(u.nlp_cue_label)}</span>` : ""}
+              ${u.cognitive_pathway ? `<span class="px-2.5 py-1 rounded-md bg-muted text-foreground border border-border font-mono text-xs">${escapeHtml(u.cognitive_pathway)}</span>` : ""}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+            <div class="bg-muted/60 border border-border rounded-lg p-2.5">
+              <div class="text-[10px] text-muted-foreground">Direction</div>
+              <div class="font-semibold text-foreground mt-0.5">${escapeHtml(u.primary_direction || "—")}</div>
+            </div>
+            <div class="bg-muted/60 border border-border rounded-lg p-2.5">
+              <div class="text-[10px] text-muted-foreground">Gaze Samples</div>
+              <div class="font-semibold text-foreground mt-0.5">${escapeHtml(u.gaze_sample_count)}</div>
+            </div>
+            <div class="bg-muted/60 border border-border rounded-lg p-2.5">
+              <div class="text-[10px] text-muted-foreground">Blink Events</div>
+              <div class="font-semibold text-foreground mt-0.5">${escapeHtml(u.blink_event_count)}</div>
+            </div>
+            <div class="bg-muted/60 border border-border rounded-lg p-2.5">
+              <div class="text-[10px] text-muted-foreground">Handedness</div>
+              <div class="font-semibold text-foreground mt-0.5">${escapeHtml(u.handedness_setting || state.normalized.handedness || "—")}</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs font-mono font-semibold text-foreground mb-2">Biometrics &amp; Telemetry Flags</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${bioEntries}</div>
+          </div>
+
+          <div>
+            <div class="text-xs font-mono font-semibold text-foreground mb-2">Raw Item Payload</div>
+            <pre class="bg-muted/70 border border-border rounded-lg p-3 text-[11px] font-mono text-foreground overflow-x-auto max-h-64">${escapeHtml(JSON.stringify(u._raw, null, 2))}</pre>
+          </div>
+        </div>
+      `;
+    }
+
+    function getFileInputElement() {
+      let input = document.getElementById("json-file-input");
+      if (!input || input.type !== "file") {
+        input = document.createElement("input");
+        input.type = "file";
+        input.id = "json-file-input";
+        input.accept = ".json,application/json";
+        input.className = "sr-only";
+        const uploadLabel = document.getElementById("btn-upload-json");
+        if (uploadLabel && uploadLabel.parentElement) {
+          uploadLabel.insertAdjacentElement("afterend", input);
+        } else {
+          document.body.prepend(input);
+        }
+      }
+      if (!input.dataset.uploadBound) {
+        input.addEventListener("change", onFileInputChange);
+        input.dataset.uploadBound = "1";
+      }
+      return input;
+    }
+
+    function onFileInputChange(e) {
+      const inputEl = e && e.target ? e.target : document.getElementById("json-file-input");
+      const file = inputEl && inputEl.files && inputEl.files.length > 0 ? inputEl.files[0] : null;
+      if (inputEl) {
+        try {
+          inputEl.value = "";
+        } catch (_) {}
+      }
+      if (file) {
+        handleUploadedFile(file);
+      } else {
+        setUploadFeedback("File selection cancelled.", "info");
+      }
+    }
+
+    function triggerJsonFilePicker(e) {
+      if (e) {
+        e.preventDefault();
+      }
+      const input = getFileInputElement();
+      if (!input) {
+        setUploadFeedback("Unable to initialize file picker.", "error");
+        return;
+      }
+      try {
+        input.value = "";
+      } catch (_) {}
+      setUploadFeedback("Opening file picker for .json export...", "info");
+      try {
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+        } else {
+          input.click();
+        }
+      } catch (_) {
+        try {
+          input.click();
+        } catch (err) {
+          setUploadFeedback(`File picker error: ${err.message}`, "error");
+          showToast(`File picker error: ${err.message}`, "error");
+        }
+      }
+    }
+
+    /**
+     * ============================================================================
+     * INTERACTION, FILE UPLOAD, CLEAR & EXPORT HANDLERS
+     * ============================================================================
+     */
+    function selectUtterance(uid, scrollIntoView = false) {
+      state.selectedUtteranceId = uid;
+      renderAll();
+
+      if (scrollIntoView && uid) {
+        const card = document.querySelector(`.utterance-card[data-uid="${CSS.escape(uid)}"]`);
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+
+    function clearSession() {
+      state.rawSession = null;
+      state.normalized = null;
+      state.selectedUtteranceId = null;
+      state.searchQuery = "";
+      state.activeFilter = "all";
+
+      const fileInput = document.getElementById("json-file-input");
+      if (fileInput) {
+        try {
+          fileInput.value = "";
+        } catch (_) {}
+      }
+
+      const searchInput = document.getElementById("search-input");
+      if (searchInput) searchInput.value = "";
+
+      const clearBtn = document.getElementById("btn-clear-search");
+      if (clearBtn) clearBtn.classList.add("hidden");
+
+      renderAll();
+      setUploadFeedback("Session cleared. Click Upload JSON or drop a .json file.", "info");
+      showToast("Session cleared.", "info");
+    }
+
+    function exportFilteredCsv() {
+      if (!state.normalized) return;
+      const rows = getFilteredUtterances();
+      const headers = [
+        "index",
+        "utterance_id",
+        "start_time_s",
+        "end_time_s",
+        "duration_s",
+        "spoken_text",
+        "primary_nlp_code",
+        "nlp_cue_label",
+        "cognitive_pathway",
+        "primary_direction",
+        "analysis_status",
+        "gaze_sample_count",
+        "blink_event_count"
+      ];
+      const escapeCsv = (val) => {
+        if (val === null || val === undefined) return "";
+        const s = String(val).replace(/"/g, '""');
+        return /[",\n\r]/.test(s) ? `"${s}"` : s;
+      };
+      const lines = [headers.join(",")];
+      rows.forEach((u) => {
+        lines.push([
+          u.index,
+          u.utterance_id,
+          u.start_time_s ?? "",
+          u.end_time_s ?? "",
+          u.duration_s ?? "",
+          u.spoken_text,
+          u.primary_nlp_code ?? "",
+          u.nlp_cue_label ?? "",
+          u.cognitive_pathway ?? "",
+          u.primary_direction ?? "",
+          u.analysis_status ?? "",
+          u.gaze_sample_count ?? 0,
+          u.blink_event_count ?? 0
+        ].map(escapeCsv).join(","));
+      });
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const baseName = (state.normalized.fileName || "cognisync-session").replace(/\.json$/i, "");
+      a.href = url;
+      a.download = `${baseName}-filtered.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast(`Exported ${rows.length} row(s) to CSV`, "success");
+    }
+
+    function exportNormalizedJson() {
+      if (!state.normalized) return;
+      const payload = {
+        exported_at: new Date().toISOString(),
+        source_file: state.normalized.fileName,
+        session_id: state.normalized.sessionId,
+        stats: state.normalized.stats,
+        utterances: state.normalized.utterances.map((u) => u._raw)
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const baseName = (state.normalized.fileName || "cognisync-session").replace(/\.json$/i, "");
+      a.href = url;
+      a.download = `${baseName}-normalized.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast("Exported normalized JSON", "success");
+    }
+
+    function initApp() {
+      renderAll();
+
+      const fileInput = getFileInputElement();
+      if (fileInput && !fileInput.dataset.uploadBound) {
+        fileInput.addEventListener("change", onFileInputChange);
+        fileInput.dataset.uploadBound = "1";
+      }
+
+      const uploadControl = document.getElementById("btn-upload-json");
+      if (uploadControl && !uploadControl.dataset.uploadBound) {
+        uploadControl.addEventListener("click", triggerJsonFilePicker);
+        uploadControl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            triggerJsonFilePicker(e);
+          }
+        });
+        uploadControl.dataset.uploadBound = "1";
+      }
+
+      const bindClick = (id, handler) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("click", handler);
+      };
+
+      bindClick("btn-dismiss-feedback", clearUploadFeedback);
+      bindClick("btn-clear-session", clearSession);
+      bindClick("btn-export-csv", exportFilteredCsv);
+      bindClick("btn-export-json", exportNormalizedJson);
+
+      const searchInput = document.getElementById("search-input");
+      const clearBtn = document.getElementById("btn-clear-search");
+      if (searchInput) {
+        searchInput.addEventListener("input", (e) => {
+          state.searchQuery = e.target.value;
+          if (clearBtn) clearBtn.classList.toggle("hidden", !state.searchQuery);
+          safeRender("Utterance Stream", renderUtteranceStream);
+        });
+        searchInput.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            state.searchQuery = "";
+            searchInput.value = "";
+            if (clearBtn) clearBtn.classList.add("hidden");
+            safeRender("Utterance Stream", renderUtteranceStream);
+          }
+        });
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          state.searchQuery = "";
+          if (searchInput) searchInput.value = "";
+          clearBtn.classList.add("hidden");
+          safeRender("Utterance Stream", renderUtteranceStream);
+        });
+      }
+
+      // Drag-and-drop JSON at document level using an explicit drag counter
+      const dropOverlay = document.getElementById("drop-overlay");
+      let dragCounter = 0;
+
+      const hasFiles = (e) => {
+        const dt = e && e.dataTransfer;
+        if (!dt) return false;
+        if (dt.files && dt.files.length > 0) return true;
+        if (dt.types && Array.from(dt.types).includes("Files")) return true;
+        return false;
+      };
+
+      const hideDragUi = () => {
+        dragCounter = 0;
+        if (dropOverlay) dropOverlay.classList.add("hidden");
+      };
+
+      document.addEventListener("dragenter", (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragCounter += 1;
+        if (dropOverlay) dropOverlay.classList.remove("hidden");
+      });
+
+      document.addEventListener("dragover", (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      });
+
+      document.addEventListener("dragleave", (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragCounter = Math.max(0, dragCounter - 1);
+        if (dragCounter === 0) {
+          hideDragUi();
+        }
+      });
+
+      document.addEventListener("drop", (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const droppedFile = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+          ? e.dataTransfer.files[0]
+          : null;
+        hideDragUi();
+        if (droppedFile) {
+          handleUploadedFile(droppedFile);
+        } else {
+          setUploadFeedback("Dropped item did not include a readable .json file.", "warn");
+        }
+      });
+
+      window.addEventListener("dragend", hideDragUi);
+
+      window.addEventListener("resize", () => {
+        safeRender("Timeline", renderTimeline);
+        safeRender("Gaze Canvas", renderGazePlot);
+      });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initApp);
+    } else {
+      initApp();
+    }
+  </script>
+</body>
+</html>
